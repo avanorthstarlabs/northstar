@@ -91,6 +91,18 @@ with tabs[2]:
     st.subheader("Latest outputs")
     patterns = ["claude_*.json", "review_claude_*__by_openai.json"]
     all_files = list_matching(patterns)
+
+    def _summarize_output(p: Path) -> dict[str, str]:
+        try:
+            data = read_json_file(p)
+            return {
+                "summary": str(data.get("summary", "")).strip(),
+                "proposal_id": str(data.get("proposal_id", "")).strip(),
+                "mode": str(data.get("mode", "")).strip(),
+            }
+        except Exception:
+            return {"summary": "", "proposal_id": "", "mode": ""}
+
     query = st.text_input("Search", placeholder="Filter by filename...")
     max_items = st.slider("Max items", min_value=5, max_value=100, value=20, step=5)
 
@@ -106,11 +118,18 @@ with tabs[2]:
             with st.container():
                 cols = st.columns([6, 2, 1])
                 with cols[0]:
+                    meta = _summarize_output(p)
                     st.markdown(f"**{p.name}**")
                     st.caption(f"{stat_mtime_iso(p)} · {p.stat().st_size} bytes")
+                    if meta["summary"]:
+                        st.markdown(f"- {meta['summary']}")
                 with cols[1]:
                     kind = "Claude proposal" if p.name.startswith("claude_") else "OpenAI review"
                     st.write(kind)
+                    if meta["mode"]:
+                        st.caption(f"Mode: {meta['mode']}")
+                    if meta["proposal_id"]:
+                        st.caption(f"ID: {meta['proposal_id']}")
                 with cols[2]:
                     if st.button("View", key=f"view_{p.name}"):
                         st.session_state["selected_output"] = str(p)

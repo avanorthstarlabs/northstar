@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, sys, subprocess, textwrap, re, json
+import os, sys, subprocess, textwrap, re, json, shutil
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -17,6 +17,25 @@ def utcnow():
 def sh(cmd: list[str], cwd: Path | None = None) -> str:
     p = subprocess.run(cmd, cwd=str(cwd) if cwd else None, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     return p.stdout
+
+def check_apply(diff: str) -> None:
+    p = subprocess.run(
+        ["git", "apply", "--check", "--whitespace=nowarn", "-"],
+        cwd=str(DASH),
+        input=diff,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    if p.returncode != 0:
+        raise ValueError(f"git apply --check failed: {p.stdout.strip()}")
+
+def detect_linter() -> list[str] | None:
+    if shutil.which("ruff"):
+        return ["ruff", "check", "app.py"]
+    if shutil.which("flake8"):
+        return ["flake8", "app.py"]
+    return None
 
 def ensure_git():
     if not (DASH / ".git").exists():
@@ -38,10 +57,55 @@ def read_latest_outputs(n=6) -> str:
 
 def extract_diff(text: str) -> str:
     # Accept typical unified diff markers
-    m = re.search(r"(?s)(^diff --git .*|^--- .*?\n\+\+\+ .*?\n)", text, re.M)
+    if "```" in text:
+        text = text.replace("```diff", "").replace("```", "")
+    if "\ufeff" in text:
+        text = text.replace("\ufeff", "")
+    if "diff --git " in text:
+        start = text.index("diff --git ")
+        return text[start:].strip()
+    stripped = text.lstrip()
+    m = re.search(r"(?s)(^diff --git .*|^--- .*?\n\+\+\+ .*?\n)", stripped, re.M)
     if not m:
         raise ValueError("No diff header found in model output.")
-    return text[m.start():].strip()
+    return stripped[m.start():].strip()
+
+def normalize_hunks(diff: str) -> str:
+    lines = diff.splitlines()
+    out = []
+    i = 0
+    hunk_re = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("@@"):
+            m = hunk_re.match(line)
+            if not m:
+                out.append(line)
+                i += 1
+                continue
+            old_start = m.group(1)
+            new_start = m.group(3)
+            j = i + 1
+            old_count = 0
+            new_count = 0
+            while j < len(lines):
+                nxt = lines[j]
+                if nxt.startswith("diff --git ") or nxt.startswith("@@"):
+                    break
+                if nxt.startswith("+") and not nxt.startswith("+++"):
+                    new_count += 1
+                elif nxt.startswith("-") and not nxt.startswith("---"):
+                    old_count += 1
+                else:
+                    old_count += 1
+                    new_count += 1
+                j += 1
+            out.append(f"@@ -{old_start},{old_count} +{new_start},{new_count} @@")
+            i += 1
+            continue
+        out.append(line)
+        i += 1
+    return "\n".join(out) + "\n"
 
 def validate_diff(diff: str) -> None:
     # Only allow paths under the dashboard folder
@@ -58,6 +122,13 @@ def validate_diff(diff: str) -> None:
                     # Disallow path traversal and absolute paths
                     if p.startswith("/") or ".." in Path(p).parts:
                         raise ValueError(f"Unsafe path in diff: {p}")
+                # If this is a modification (not a new file), require that the file exists
+                if a != "/dev/null" and b != "/dev/null":
+                    target = DASH / b
+                    if b == "CHANGELOG.md":
+                        raise ValueError("Do not modify CHANGELOG.md in model diff; it is updated automatically.")
+                    if not target.exists():
+                        raise ValueError(f"Diff refers to missing file: {b}")
     # Additional protection: forbid edits outside repo by relying on git apply in repo
     # Also cap diff size
     if len(diff) > 250_000:
@@ -69,24 +140,70 @@ def call_ollama(prompt: str, model: str) -> str:
     r.raise_for_status()
     return r.json().get("response","")
 
+def call_openai(prompt: str, model: str) -> str:
+    from openai import OpenAI
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY not set")
+    client = OpenAI(api_key=api_key)
+    system = (
+        "You are an autonomous code editor. "
+        "Return ONLY a unified diff. "
+        "The first line MUST start with: diff --git "
+        "No markdown, no commentary, no extra text. "
+        "Do NOT modify CHANGELOG.md; it is updated automatically. "
+        "Keep changes small (aim for <= 120 lines changed)."
+    )
+    resp = client.responses.create(
+        model=model,
+        input=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ],
+    )
+    text = ""
+    try:
+        text = resp.output_text
+    except Exception:
+        for o in getattr(resp, "output", []):
+            for c in getattr(o, "content", []):
+                if getattr(c, "type", None) in ("output_text", "text"):
+                    text += getattr(c, "text", "")
+    return text
+
 def main():
     model = os.environ.get("AUTOPATCH_MODEL", "qwen2.5-coder:7b")
+    provider = os.environ.get("AUTOPATCH_PROVIDER", "ollama").strip().lower()
     ensure_git()
+    if not CHANGELOG.exists():
+        CHANGELOG.write_text("# Changelog\n\n", encoding="utf-8")
 
     work = WORK_ORDER.read_text(encoding="utf-8") if WORK_ORDER.exists() else ""
     context = read_latest_outputs()
+
+    app_text = (DASH / "app.py").read_text(encoding="utf-8")
 
     instructions = f"""
 You are an autonomous engineer improving a local Streamlit dashboard project.
 
 Repository folder:
 {DASH}
+Main app file: app.py (do not use main.py).
 
 Hard rules:
 - Output ONLY a unified diff (git style). No commentary.
+- The first line MUST be: diff --git
+- Do NOT modify CHANGELOG.md; it is updated automatically after the patch.
+- Keep changes small (aim for <= 120 lines changed).
 - Only change files inside this repository (relative paths).
 - Keep patches small and incremental.
 - Prefer adding UX pages/tabs, summaries, timeline, and "Brief me" feature using Ollama.
+
+Repository files (current):
+{chr(10).join(sorted([str(p.relative_to(DASH)) for p in DASH.rglob('*') if p.is_file()]))}
+
+Current app.py (verbatim):
+{app_text}
 
 Work order:
 {work}
@@ -97,9 +214,28 @@ Recent agent outputs (for grounding):
 Now produce the next patch.
 """.strip()
 
-    raw = call_ollama(instructions, model=model)
-    diff = extract_diff(raw)
-    validate_diff(diff)
+    raw = ""
+    diff = ""
+    for attempt in range(2):
+        extra = "\nREMINDER: Output ONLY unified diff. No markdown. No commentary.\n" if attempt > 0 else ""
+        prompt = instructions + extra
+        if provider in ("codex", "openai"):
+            raw = call_openai(prompt, model=model)
+        else:
+            raw = call_ollama(prompt, model=model)
+        try:
+            diff = normalize_hunks(extract_diff(raw))
+            validate_diff(diff)
+            check_apply(diff)
+            break
+        except Exception:
+            diff = ""
+            continue
+    if not diff:
+        ts = utcnow().replace(":", "-")
+        raw_path = LOGS / f"dashboard_patch_raw_{ts}.txt"
+        raw_path.write_text(raw, encoding="utf-8")
+        raise ValueError(f"Model output did not contain a valid unified diff after retry. Raw saved to {raw_path.name}")
 
     # Save diff artifact
     ts = utcnow().replace(":", "-")
@@ -109,13 +245,16 @@ Now produce the next patch.
     # Apply diff
     sh(["git", "apply", "--whitespace=nowarn", str(diff_path)], cwd=DASH)
 
-    # Smoke: import app
-    # (don’t run server; just ensure syntax)
+    # Smoke: compile + import checks
+    sh([sys.executable, "-m", "py_compile", "app.py"], cwd=DASH)
+    sh([sys.executable, "-c", "import streamlit, app"], cwd=DASH)
     sh([sys.executable, "-c", "import app"], cwd=DASH)
 
+    lint_cmd = detect_linter()
+    if lint_cmd:
+        sh(lint_cmd, cwd=DASH)
+
     # Changelog
-    if not CHANGELOG.exists():
-        CHANGELOG.write_text("# Changelog\n\n", encoding="utf-8")
     with CHANGELOG.open("a", encoding="utf-8") as f:
         f.write(f"## {utcnow()}\n- Applied patch: {diff_path.name}\n\n")
 
