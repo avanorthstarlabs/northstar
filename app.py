@@ -1,23 +1,82 @@
+from __future__ import annotations
+from pathlib import Path
+from datetime import datetime
+import json
 import streamlit as st
 from lib.runtime import (
     read_mode, write_mode,
     read_inbox, write_inbox,
     trigger_run,
     latest_claude, latest_review,
-    read_json_file
+    read_json_file,
+    list_matching,
+    stat_mtime_iso,
+    extract_timestamp
 )
 from lib.ollama import list_models, chat
 
-st.set_page_config(page_title="Agent Runtime Dashboard", layout="wide")
+APP_ROOT = Path(__file__).parent
+LOGO_PATH = APP_ROOT / "assets" / "logo.svg"
 
-st.title("Agent Runtime Dashboard")
+st.set_page_config(page_title="Agent Runtime Dashboard", layout="wide", page_icon=":)")
+
+cols_title = st.columns([1, 8])
+with cols_title[0]:
+    if LOGO_PATH.exists():
+        st.image(str(LOGO_PATH), width=72)
+with cols_title[1]:
+    st.title("Agent Runtime Dashboard")
 
 tabs = st.tabs(["Overview", "Inbox", "Outputs", "Timeline", "Settings", "Chat"])
 
 with tabs[0]:
     st.subheader("Brief me")
     st.write("Summarize inbox and latest proposals with local Ollama.")
-    st.info("Briefing will be wired in a later patch.")
+
+    try:
+        models = list_models()
+    except Exception as e:
+        models = []
+        st.error(f"Could not reach Ollama at 127.0.0.1:11434 — {e}")
+
+    if not models:
+        st.warning("No Ollama models found. Pull one: ollama pull qwen2.5-coder:3b (or similar)")
+    else:
+        model = st.selectbox("Model", models, index=0, key="brief_model")
+        if st.button("Brief me"):
+            inbox_text = read_inbox().strip()
+            cpath = latest_claude()
+            rpath = latest_review()
+
+            def _json_blob(p: Path | None) -> str:
+                if not p:
+                    return "(none)"
+                try:
+                    data = read_json_file(p)
+                    return json.dumps(data, indent=2)[:12000]
+                except Exception as e:
+                    return f"(failed to read {p.name}: {e})"
+
+            prompt = (
+                "You are a private agent assistant. Summarize the inbox and the latest proposals.\n"
+                "Return a short briefing with: (1) top priorities, (2) risks/blocks, (3) next actions.\n\n"
+                "INBOX:\n"
+                f"{inbox_text or '(empty)'}\n\n"
+                "LATEST_CLAUDE_PROPOSAL_JSON:\n"
+                f"{_json_blob(cpath)}\n\n"
+                "LATEST_OPENAI_REVIEW_JSON:\n"
+                f"{_json_blob(rpath)}\n"
+            )
+            with st.spinner("Briefing..."):
+                try:
+                    from lib.ollama import generate
+                    out = generate(model, prompt)
+                    st.session_state["briefing"] = out
+                except Exception as e:
+                    st.error(f"Briefing failed: {e}")
+
+        if "briefing" in st.session_state:
+            st.text_area("Briefing", value=st.session_state["briefing"], height=320)
 
 with tabs[1]:
     st.subheader("Inbox (directives/priorities/00_inbox.md)")
@@ -28,32 +87,85 @@ with tabs[1]:
 
 with tabs[2]:
     st.subheader("Latest outputs")
-    cpath = latest_claude()
-    rpath = latest_review()
+    patterns = ["claude_*.json", "review_claude_*__by_openai.json"]
+    all_files = list_matching(patterns)
+    query = st.text_input("Search", placeholder="Filter by filename...")
+    max_items = st.slider("Max items", min_value=5, max_value=100, value=20, step=5)
 
-    if cpath:
-        with st.expander(f"Claude proposal: {cpath.name}", expanded=True):
+    filtered = [p for p in all_files if query.lower() in p.name.lower()] if query else all_files
+
+    if not filtered:
+        st.info("No matching proposal files found.")
+    else:
+        if "selected_output" not in st.session_state:
+            st.session_state["selected_output"] = str(filtered[0])
+
+        for p in filtered[:max_items]:
+            with st.container():
+                cols = st.columns([6, 2, 1])
+                with cols[0]:
+                    st.markdown(f"**{p.name}**")
+                    st.caption(f"{stat_mtime_iso(p)} · {p.stat().st_size} bytes")
+                with cols[1]:
+                    kind = "Claude proposal" if p.name.startswith("claude_") else "OpenAI review"
+                    st.write(kind)
+                with cols[2]:
+                    if st.button("View", key=f"view_{p.name}"):
+                        st.session_state["selected_output"] = str(p)
+                st.divider()
+
+        sel = st.session_state.get("selected_output")
+        if sel:
+            p = Path(sel)
+            st.subheader(f"Viewer: {p.name}")
             try:
-                st.json(read_json_file(cpath))
+                st.json(read_json_file(p))
             except Exception as e:
                 st.error(f"Failed to read JSON: {e}")
-                st.code(cpath.read_text(encoding='utf-8')[:12000])
-    else:
-        st.info("No claude_*.json found yet.")
-
-    if rpath:
-        with st.expander(f"OpenAI review: {rpath.name}", expanded=False):
-            try:
-                st.json(read_json_file(rpath))
-            except Exception as e:
-                st.error(f"Failed to read JSON: {e}")
-                st.code(rpath.read_text(encoding='utf-8')[:12000])
-    else:
-        st.info("No review_claude_*__by_openai.json found yet.")
+                st.code(p.read_text(encoding="utf-8")[:12000])
 
 with tabs[3]:
     st.subheader("Timeline")
-    st.info("Timeline charts will be wired in a later patch.")
+    patterns = ["claude_*.json", "review_claude_*__by_openai.json"]
+    files = list_matching(patterns)
+
+    def _bucket_day(dt: datetime) -> str:
+        return dt.strftime("%Y-%m-%d")
+
+    def _bucket_week(dt: datetime) -> str:
+        iso = dt.isocalendar()
+        return f"{iso.year}-W{iso.week:02d}"
+
+    def _bucket_month(dt: datetime) -> str:
+        return dt.strftime("%Y-%m")
+
+    def _count_by(bucket_fn):
+        counts: dict[str, int] = {}
+        for p in files:
+            dt = extract_timestamp(p)
+            key = bucket_fn(dt)
+            counts[key] = counts.get(key, 0) + 1
+        return dict(sorted(counts.items()))
+
+    if not files:
+        st.info("No proposal files found yet.")
+    else:
+        st.write(f"Total proposals: {len(files)}")
+        day_counts = _count_by(_bucket_day)
+        week_counts = _count_by(_bucket_week)
+        month_counts = _count_by(_bucket_month)
+
+        def _render_table(title: str, data: dict[str, int]):
+            st.markdown(f"**{title}**")
+            if not data:
+                st.write("No data.")
+                return
+            rows = "\n".join([f"| {k} | {v} |" for k, v in data.items()])
+            st.markdown("| Period | Count |\n|---|---|\n" + rows)
+
+        _render_table("Per day", day_counts)
+        _render_table("Per week", week_counts)
+        _render_table("Per month", month_counts)
 
 with tabs[4]:
     st.subheader("Control")

@@ -69,3 +69,35 @@ def list_matching(patterns: list[str]) -> list[Path]:
 def stat_mtime_iso(p: Path) -> str:
     ts = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
     return ts.isoformat()
+
+def extract_timestamp(p: Path) -> datetime:
+    try:
+        data = read_json_file(p)
+    except Exception:
+        data = None
+    if isinstance(data, dict):
+        for key in ("timestamp", "created_at", "createdAt", "created", "ts", "time", "date"):
+            if key in data:
+                dt = _parse_timestamp_value(data.get(key))
+                if dt:
+                    return dt
+    return datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
+
+def _parse_timestamp_value(value) -> datetime | None:
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(float(value), tz=timezone.utc)
+        except Exception:
+            return None
+    if isinstance(value, str):
+        s = value.strip()
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        try:
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except Exception:
+            return None
+    return None
