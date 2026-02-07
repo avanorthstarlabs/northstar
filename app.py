@@ -17,8 +17,10 @@ from lib.ollama import list_models, chat
 
 APP_ROOT = Path(__file__).parent
 LOGO_PATH = APP_ROOT / "assets" / "logo.svg"
+ICON_PATH = APP_ROOT / "assets" / "icon.png"
 
-st.set_page_config(page_title="Agent Runtime Dashboard", layout="wide", page_icon=":)")
+page_icon = str(ICON_PATH) if ICON_PATH.exists() else ":)"
+st.set_page_config(page_title="Agent Runtime Dashboard", layout="wide", page_icon=page_icon)
 
 cols_title = st.columns([1, 8])
 with cols_title[0]:
