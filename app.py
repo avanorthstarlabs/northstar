@@ -12,29 +12,21 @@ st.set_page_config(page_title="Agent Runtime Dashboard", layout="wide")
 
 st.title("Agent Runtime Dashboard")
 
-# Sidebar controls
-with st.sidebar:
-    st.header("Control")
-    current_mode = read_mode()
-    mode = st.radio("Mode", ["DIRECTED", "AUTONOMOUS"], index=0 if current_mode=="DIRECTED" else 1)
-    if mode != current_mode:
-        write_mode(mode)
-        st.success(f"Mode set to {mode}")
+tabs = st.tabs(["Overview", "Inbox", "Outputs", "Timeline", "Settings", "Chat"])
 
-    if st.button("Trigger run"):
-        trigger_run()
-        st.success("Triggered (wrote .trigger)")
+with tabs[0]:
+    st.subheader("Brief me")
+    st.write("Summarize inbox and latest proposals with local Ollama.")
+    st.info("Briefing will be wired in a later patch.")
 
-# Main layout
-colA, colB = st.columns([1, 1])
-
-with colA:
+with tabs[1]:
     st.subheader("Inbox (directives/priorities/00_inbox.md)")
-    inbox = st.text_area("Edit", value=read_inbox(), height=260)
+    inbox = st.text_area("Edit", value=read_inbox(), height=420)
     if st.button("Save inbox"):
         write_inbox(inbox)
         st.success("Inbox saved")
 
+with tabs[2]:
     st.subheader("Latest outputs")
     cpath = latest_claude()
     rpath = latest_review()
@@ -59,7 +51,23 @@ with colA:
     else:
         st.info("No review_claude_*__by_openai.json found yet.")
 
-with colB:
+with tabs[3]:
+    st.subheader("Timeline")
+    st.info("Timeline charts will be wired in a later patch.")
+
+with tabs[4]:
+    st.subheader("Control")
+    current_mode = read_mode()
+    mode = st.radio("Mode", ["DIRECTED", "AUTONOMOUS"], index=0 if current_mode=="DIRECTED" else 1)
+    if mode != current_mode:
+        write_mode(mode)
+        st.success(f"Mode set to {mode}")
+
+    if st.button("Trigger run"):
+        trigger_run()
+        st.success("Triggered (wrote .trigger)")
+
+with tabs[5]:
     st.subheader("Local Ollama chat")
     try:
         models = list_models()

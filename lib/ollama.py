@@ -18,3 +18,7 @@ def chat(model: str, prompt: str) -> str:
     r.raise_for_status()
     j = r.json()
     return j.get("response", "")
+
+def generate(model: str, prompt: str) -> str:
+    # Same endpoint as chat, but used for one-shot summaries
+    return chat(model, prompt)

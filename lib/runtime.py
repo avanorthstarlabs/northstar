@@ -57,3 +57,15 @@ def latest_review() -> Path | None:
 def read_json_file(p: Path) -> dict:
     data = p.read_text(encoding="utf-8")
     return json.loads(data)
+
+def list_matching(patterns: list[str]) -> list[Path]:
+    if not PROPOSALS_DIR.exists():
+        return []
+    items: list[Path] = []
+    for pattern in patterns:
+        items.extend(PROPOSALS_DIR.glob(pattern))
+    return sorted(items, key=lambda p: p.stat().st_mtime, reverse=True)
+
+def stat_mtime_iso(p: Path) -> str:
+    ts = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
+    return ts.isoformat()
