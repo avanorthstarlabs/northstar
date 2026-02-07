@@ -13,6 +13,7 @@ from lib.runtime import (
     stat_mtime_iso,
     extract_timestamp
 )
+from typing import Iterable
 from lib.ollama import list_models, chat
 
 APP_ROOT = Path(__file__).parent
@@ -31,7 +32,30 @@ with cols_title[1]:
 
 tabs = st.tabs(["Overview", "Inbox", "Outputs", "Timeline", "Settings", "Chat"])
 
+def _latest_file(files: Iterable[Path]) -> Path | None:
+    latest: Path | None = None
+    latest_ts: datetime | None = None
+    for p in files:
+        dt = extract_timestamp(p)
+        if not latest_ts or dt > latest_ts:
+            latest = p
+            latest_ts = dt
+    return latest
+
 with tabs[0]:
+    st.subheader("Status snapshot")
+    patterns = ["claude_*.json", "review_claude_*__by_openai.json"]
+    all_files = list_matching(patterns)
+    latest_any = _latest_file(all_files)
+    latest_review = _latest_file([p for p in all_files if p.name.startswith("review_claude_")])
+    inbox_raw = read_inbox()
+
+    cols = st.columns(4)
+    cols[0].metric("Total proposals", len(all_files))
+    cols[1].metric("Latest activity", stat_mtime_iso(latest_any) if latest_any else "—")
+    cols[2].metric("Latest review", stat_mtime_iso(latest_review) if latest_review else "—")
+    cols[3].metric("Inbox lines", len([l for l in inbox_raw.splitlines() if l.strip()]))
+
     st.subheader("Brief me")
     st.write("Summarize inbox and latest proposals with local Ollama.")
 
@@ -46,7 +70,7 @@ with tabs[0]:
     else:
         model = st.selectbox("Model", models, index=0, key="brief_model")
         if st.button("Brief me"):
-            inbox_text = read_inbox().strip()
+            inbox_text = inbox_raw.strip()
             cpath = latest_claude()
             rpath = latest_review()
 
@@ -79,6 +103,16 @@ with tabs[0]:
 
         if "briefing" in st.session_state:
             st.text_area("Briefing", value=st.session_state["briefing"], height=320)
+
+    st.subheader("Recent files")
+    if not all_files:
+        st.info("No proposals found yet.")
+    else:
+        for p in sorted(all_files, key=lambda x: extract_timestamp(x), reverse=True)[:5]:
+            cols = st.columns([6, 2, 2])
+            cols[0].markdown(f"**{p.name}**")
+            cols[1].caption(stat_mtime_iso(p))
+            cols[2].caption(f"{p.stat().st_size} bytes")
 
 with tabs[1]:
     st.subheader("Inbox (directives/priorities/00_inbox.md)")

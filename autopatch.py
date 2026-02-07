@@ -108,6 +108,8 @@ def normalize_hunks(diff: str) -> str:
     return "\n".join(out) + "\n"
 
 def validate_diff(diff: str) -> None:
+    allowed_roots = {"app.py", "lib", "assets"}
+    allowed_paths = set()
     # Only allow paths under the dashboard folder
     # Check diff --git a/<path> b/<path>
     for line in diff.splitlines():
@@ -122,6 +124,11 @@ def validate_diff(diff: str) -> None:
                     # Disallow path traversal and absolute paths
                     if p.startswith("/") or ".." in Path(p).parts:
                         raise ValueError(f"Unsafe path in diff: {p}")
+                    # Only allow updates within allowlist roots
+                    root = Path(p).parts[0]
+                    if root not in allowed_roots:
+                        raise ValueError(f"Disallowed path in diff: {p}")
+                    allowed_paths.add(p)
                 # If this is a modification (not a new file), require that the file exists
                 if a != "/dev/null" and b != "/dev/null":
                     target = DASH / b
