@@ -1,6 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import streamlit as st
 from lib.runtime import (
@@ -184,6 +184,26 @@ with tabs[3]:
     patterns = ["claude_*.json", "review_claude_*__by_openai.json"]
     files = list_matching(patterns)
 
+    def _counts_last_days(days: int = 14) -> dict[str, int]:
+        today = datetime.now().date()
+        counts: dict[str, int] = {
+            (today - timedelta(days=i)).strftime("%Y-%m-%d"): 0 for i in range(days - 1, -1, -1)
+        }
+        for p in files:
+            dt = extract_timestamp(p).date().strftime("%Y-%m-%d")
+            if dt in counts:
+                counts[dt] += 1
+        return counts
+
+    def _current_streak(counts: dict[str, int]) -> int:
+        streak = 0
+        for day in reversed(list(counts.keys())):
+            if counts[day] > 0:
+                streak += 1
+            else:
+                break
+        return streak
+
     def _bucket_day(dt: datetime) -> str:
         return dt.strftime("%Y-%m-%d")
 
@@ -206,6 +226,17 @@ with tabs[3]:
         st.info("No proposal files found yet.")
     else:
         st.write(f"Total proposals: {len(files)}")
+        last_14 = _counts_last_days(14)
+        total_14 = sum(last_14.values())
+        most_active_day = max(last_14.items(), key=lambda x: x[1])
+        streak = _current_streak(last_14)
+        cols = st.columns(3)
+        cols[0].metric("Total (14d)", total_14)
+        cols[1].metric("Most active day", most_active_day[0], delta=f"{most_active_day[1]} proposals")
+        cols[2].metric("Current streak", f"{streak} day(s)")
+        st.markdown("**Daily activity (14 days)**")
+        st.bar_chart(last_14)
+
         day_counts = _count_by(_bucket_day)
         week_counts = _count_by(_bucket_week)
         month_counts = _count_by(_bucket_month)
