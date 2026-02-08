@@ -36,14 +36,7 @@ with cols_title[0]:
 with cols_title[1]:
     st.title("Agent Runtime Dashboard")
 
-# Auto-refresh toggle in sidebar
-with st.sidebar:
-    st.markdown("### ⚙️ Dashboard")
-    auto_refresh = st.toggle("Auto-refresh (30s)", value=False, key="auto_refresh")
-    if auto_refresh:
-        st.caption("Page will refresh every 30 seconds.")
-
-tabs = st.tabs(["Overview", "Projects", "Inbox", "Outputs", "Timeline", "Settings", "Chat", "Logs", "Health", "Digest"])
+tabs = st.tabs(["Overview", "Projects", "Inbox", "Outputs", "Timeline", "Settings", "Chat", "Logs", "Health", "Digest", "Notes"])
 
 def _latest_file(files: Iterable[Path]) -> Path | None:
     latest: Path | None = None
@@ -128,6 +121,91 @@ def _touch_trigger(note: str) -> None:
             f.write(f"{note} {ts}\n")
     except Exception:
         pass
+
+def _render_sidebar() -> None:
+    with st.sidebar:
+        st.markdown("### ⚙️ Dashboard")
+
+        # Quick status summary
+        _sb_status_path = Path("/home/hackerman/agent-runtime/workspace/projects/agent-dashboard/status.json")
+        _sb_status = "UNKNOWN"
+        if _sb_status_path.exists():
+            try:
+                _sb_data = json.loads(_sb_status_path.read_text(encoding="utf-8"))
+                _sb_status = _sb_data.get("status", "UNKNOWN")
+            except Exception:
+                pass
+        _sb_health, _sb_health_reason = _read_cycle_health()
+        _sb_health_icon = "🟢" if _sb_health == "ok" else ("🔴" if _sb_health == "error" else "⚪")
+        _sb_status_icon = {"IN_PROGRESS": "🔄", "DONE": "✅", "PENDING_HUMAN_REVIEW": "⏳"}.get(_sb_status, "❓")
+
+        st.markdown(
+            f"""
+            <div style="border:1px solid rgba(57,255,20,0.2); border-radius:10px; padding:10px 12px; margin-bottom:12px;
+                         background:rgba(7,12,7,0.5); font-size:0.85rem;">
+                <div style="margin-bottom:4px;">{_sb_health_icon} <b>Cycle:</b> {_sb_health.upper()}</div>
+                <div style="margin-bottom:4px;">{_sb_status_icon} <b>Project:</b> {_sb_status}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        auto_refresh = st.toggle("Auto-refresh (30s)", value=False, key="auto_refresh")
+        if auto_refresh:
+            st.caption("Page will refresh every 30 seconds.")
+
+        st.divider()
+        st.markdown("### 🚀 Quick Actions")
+        if st.button("🔄 Refresh now", key="sidebar_refresh", use_container_width=True):
+            st.rerun()
+        if st.button("📋 Brief me", key="sidebar_brief", use_container_width=True):
+            st.session_state["_jump_to_brief"] = True
+            st.rerun()
+        if st.button("💬 Open chat", key="sidebar_chat", use_container_width=True):
+            st.session_state["_jump_to_chat"] = True
+            st.rerun()
+        if st.button("📝 Notes", key="sidebar_notes", use_container_width=True):
+            st.session_state["_jump_to_notes"] = True
+            st.rerun()
+
+        # Pinned note (quick sticky)
+        st.divider()
+        st.markdown("### 📌 Pinned Note")
+        _pin_path = Path("/home/hackerman/agent-runtime/workspace/projects/agent-dashboard/pinned_note.txt")
+        _pin_text = ""
+        if _pin_path.exists():
+            try:
+                _pin_text = _pin_path.read_text(encoding="utf-8", errors="ignore").strip()
+            except Exception:
+                pass
+        if _pin_text:
+            st.markdown(
+                f'<div style="border:1px solid rgba(57,255,20,0.25); border-radius:8px; padding:8px 10px; '
+                f'background:rgba(7,12,7,0.5); font-size:0.82rem; color:#eaffea; white-space:pre-wrap;">'
+                f'{_html.escape(_pin_text[:200])}</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.caption("No pinned note. Add one in the Notes tab.")
+
+
+        st.divider()
+        st.markdown("### 📊 Quick Stats")
+        _sb_patterns = ["claude_*.json", "review_claude_*__by_openai.json"]
+        _sb_all_files = list_matching(_sb_patterns)
+        _sb_inbox_raw = read_inbox()
+        _sb_inbox_lines = len([l for l in _sb_inbox_raw.splitlines() if l.strip()])
+        st.caption(f"📄 {len(_sb_all_files)} proposals")
+        st.caption(f"📥 {_sb_inbox_lines} inbox items")
+        _sb_last_cycle = _last_cycle_ts()
+        if _sb_last_cycle:
+            _sb_age = (datetime.now(timezone.utc) - _sb_last_cycle).total_seconds() / 60.0
+            if _sb_age < 60:
+                st.caption(f"⏱️ Last cycle: {_sb_age:.0f}m ago")
+            else:
+                st.caption(f"⏱️ Last cycle: {_sb_age/60:.1f}h ago")
+        else:
+            st.caption("⏱️ No cycle history")
 
 def _latest_patch_name() -> str:
     logs = Path("/home/hackerman/agent-runtime/logs")
@@ -391,6 +469,8 @@ def _activity_feed(limit: int = 6) -> list[dict]:
         })
     return out
 
+_render_sidebar()
+
 with tabs[0]:
     st.markdown(
         """
@@ -606,6 +686,7 @@ with tabs[0]:
 
         if "briefing" in st.session_state:
             st.text_area("Briefing", value=st.session_state["briefing"], height=320)
+            _copy_button(st.session_state["briefing"], key="copy_briefing")
 
             if "briefing_ts" in st.session_state:
                 st.caption(f"Generated at {st.session_state['briefing_ts']}")
@@ -990,17 +1071,57 @@ with tabs[6]:
     if not models:
         st.warning("No Ollama models found. Pull one: ollama pull qwen2.5-coder:3b (or similar)")
     else:
-        # Maintain chat history in session state
         if "chat_history" not in st.session_state:
             st.session_state["chat_history"] = []
 
         if st.session_state["chat_history"]:
-            st.markdown("**Conversation history**")
+            st.markdown(f"**Conversation history** ({len(st.session_state['chat_history']) // 2} exchanges)")
             for msg in st.session_state["chat_history"][-10:]:
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
         model = st.selectbox("Model", models, index=0)
-        prompt = st.text_area("Prompt", height=220, help="Ask anything (local-only).")
+
+        # Use session state for prompt to survive quick-prompt reruns
+        _default_prompt = st.session_state.pop("_qp_prompt", "")
+        prompt = st.text_area("Prompt", value=_default_prompt, height=220, help="Ask anything (local-only).", key="chat_prompt_area")
+        if _default_prompt:
+            st.info("Quick prompt loaded — click 'Send to Ollama' to run it.")
+        
+        # Contextual quick prompts
+        st.markdown("**Quick prompts**")
+        qp_cols = st.columns(3)
+        with qp_cols[0]:
+            if st.button("📊 Summarize status", key="qp_status", use_container_width=True):
+                _qp_inbox = read_inbox().strip()
+                _qp_projects_root = Path("/home/hackerman/agent-runtime/workspace/projects")
+                _qp_statuses = []
+                if _qp_projects_root.exists():
+                    for _qp_p in _qp_projects_root.iterdir():
+                        if _qp_p.is_dir():
+                            _qp_sp = _qp_p / "status.json"
+                            if _qp_sp.exists():
+                                try:
+                                    _qp_d = json.loads(_qp_sp.read_text(encoding="utf-8"))
+                                    _qp_statuses.append(f"{_qp_p.name}: {_qp_d.get('status', '?')}")
+                                except Exception:
+                                    pass
+                prompt = f"Summarize the current state of my projects and suggest what to focus on next.\n\nProject statuses:\n" + "\n".join(_qp_statuses) + f"\n\nInbox:\n{_qp_inbox[:2000]}"
+                st.session_state["_qp_prompt"] = prompt
+                st.rerun()
+            if st.button("🐛 Debug last failure", key="qp_debug", use_container_width=True):
+                _qp_failures = _recent_failures(1)
+                _qp_fail_text = _qp_failures[0][:1500] if _qp_failures else "(no recent failures)"
+                prompt = f"Analyze this CI/build failure and suggest a fix:\n\n{_qp_fail_text}"
+                st.session_state["_qp_prompt"] = prompt
+                st.rerun()
+        with qp_cols[2]:
+            if st.button("📝 Draft changelog", key="qp_changelog", use_container_width=True):
+                _qp_feed = _activity_feed(limit=10)
+                _qp_feed_text = "\n".join(f"- {i['ts']}: {i['summary']}" for i in _qp_feed) if _qp_feed else "(no activity)"
+                prompt = f"Write a concise changelog entry based on these recent activities:\n\n{_qp_feed_text}"
+                st.session_state["_qp_prompt"] = prompt
+                st.rerun()
+
         if st.button("Send to Ollama"):
             if not prompt.strip():
                 st.warning("Type a prompt first.")
@@ -1364,8 +1485,100 @@ with tabs[9]:
             st.markdown(st.session_state["digest"])
             st.caption(f"Generated at {st.session_state.get('digest_ts', '—')}")
 
+            # Export digest
+            d_exp_cols = st.columns(3)
+            with d_exp_cols[0]:
+                _copy_button(st.session_state["digest"], key="copy_digest")
+            with d_exp_cols[1]:
+                st.download_button(
+                    "📥 Download as Markdown",
+                    data=f"# Daily Digest — {st.session_state.get('digest_ts', 'unknown')}\n\n{st.session_state['digest']}",
+                    file_name=f"digest_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
+                    mime="text/markdown",
+                )
+
+# ── Notes tab ────────────────────────────────────────────────────
+with tabs[10]:
+    st.subheader("Notes & Scratchpad")
+    st.caption("Persistent notes for yourself. Pinned note shows in the sidebar.")
+
+    _notes_dir = APP_ROOT / "notes"
+    _notes_dir.mkdir(exist_ok=True)
+    _pin_path = APP_ROOT / "pinned_note.txt"
+
+    # Pinned note editor
+    st.markdown("### 📌 Pinned Note")
+    st.caption("This appears in the sidebar for quick reference.")
+    _pin_current = ""
+    if _pin_path.exists():
+        try:
+            _pin_current = _pin_path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            pass
+    _pin_new = st.text_area("Pinned note", value=_pin_current, height=100, key="pinned_note_edit",
+                            placeholder="e.g. 'Focus on health tab styling today'")
+    if st.button("Save pinned note", key="save_pin"):
+        try:
+            _pin_path.write_text(_pin_new, encoding="utf-8")
+            st.success("Pinned note saved.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Failed to save: {e}")
+
+    st.divider()
+
+    # Scratchpad notes (timestamped)
+    st.markdown("### 📝 Scratchpad")
+    st.caption("Quick timestamped notes. Saved as individual files.")
+
+    _new_note = st.text_area("New note", height=120, key="new_scratch_note",
+                             placeholder="Type a note and click Save…")
+    if st.button("Save note", key="save_scratch"):
+        if _new_note.strip():
+            ts = datetime.now(timezone.utc)
+            fname = f"note_{ts.strftime('%Y%m%d_%H%M%S')}.md"
+            fpath = _notes_dir / fname
+            try:
+                content = f"# Note — {ts.astimezone(PST).strftime('%b %d, %Y %H:%M')}\n\n{_new_note.strip()}\n"
+                fpath.write_text(content, encoding="utf-8")
+                st.success(f"Saved: {fname}")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to save note: {e}")
+        else:
+            st.warning("Write something first.")
+
+    # List existing notes
+    _existing_notes = sorted(_notes_dir.glob("note_*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if _existing_notes:
+        st.divider()
+        st.markdown(f"**Saved notes** ({len(_existing_notes)})")
+        for _np in _existing_notes[:20]:
+            try:
+                _nc = _np.read_text(encoding="utf-8", errors="ignore")
+                _first_line = _nc.strip().splitlines()[0] if _nc.strip() else _np.name
+                with st.expander(f"{_first_line}  ·  {_fmt_mtime(_np)}", expanded=False):
+                    st.markdown(_nc)
+                    _del_col, _pin_col = st.columns(2)
+                    with _del_col:
+                        if st.button("🗑️ Delete", key=f"del_{_np.name}"):
+                            _np.unlink()
+                            st.rerun()
+                    with _pin_col:
+                        if st.button("📌 Pin this", key=f"pin_{_np.name}"):
+                            # Extract content without the header
+                            _lines = _nc.strip().splitlines()
+                            _body = "\n".join(_lines[1:]).strip() if len(_lines) > 1 else _nc.strip()
+                            _pin_path.write_text(_body[:200], encoding="utf-8")
+                            st.success("Pinned!")
+                            st.rerun()
+            except Exception:
+                st.caption(f"Could not read {_np.name}")
+    else:
+        st.caption("No saved notes yet.")
+
 # Auto-refresh implementation
-if auto_refresh:
+if st.session_state.get("auto_refresh"):
     import time
     time.sleep(0.1)  # small delay to let page render
     st.markdown(
