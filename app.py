@@ -1,6 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+import re
 from zoneinfo import ZoneInfo
 import base64
 import json
@@ -19,7 +20,7 @@ from lib.runtime import (
 import streamlit.components.v1 as components
 import html as _html
 from typing import Iterable
-from lib.ollama import list_models, chat
+from lib.openclaw_client import generate, chat
 
 APP_ROOT = Path(__file__).parent
 LOGO_PATH = APP_ROOT / "assets" / "logo.svg"
@@ -64,6 +65,7 @@ st.markdown(
         box-shadow: 0 0 20px rgba(57,255,20,0.3);
     }
     div[data-baseweb="select"] > div {
+        background: rgba(7, 12, 7, 0.6) !important;
         border-color: var(--accent) !important;
     }
     /* Glass grid & cards */
@@ -75,6 +77,7 @@ st.markdown(
         backdrop-filter: blur(8px);
         box-shadow: 0 6px 24px rgba(0,0,0,0.35);
         transition: border-color 200ms ease, box-shadow 200ms ease;
+        overflow: hidden;
     }
     .glass-card:hover {
         border-color: rgba(57,255,20,0.45);
@@ -365,39 +368,118 @@ st.markdown(
         color: var(--text) !important;
         border-radius: 8px !important;
     }
+    /* ── Chat message styling ─────────────────────────────────── */
+    div[data-testid="stChatMessage"] {
+        background: var(--panel) !important;
+        border: 1px solid var(--accent-border) !important;
+        border-radius: 12px !important;
+        margin-bottom: 8px;
+    }
+
+    /* ── Compact toast / success / warning / error ────────────── */
+    div[data-testid="stAlert"] {
+        border-radius: 10px !important;
+        font-size: 0.85rem !important;
+    }
+
+    /* ── Code block styling ───────────────────────────────────── */
+    pre {
+        background: rgba(5, 8, 5, 0.7) !important;
+        border: 1px solid var(--accent-border) !important;
+        border-radius: 8px !important;
+    }
+
+    /* ── Radio / toggle styling ───────────────────────────────── */
+    div[data-baseweb="radio"] label span {
+        color: var(--text) !important;
+    }
+
+    /* ── Download button ──────────────────────────────────────── */
+    .stDownloadButton > button {
+        background: transparent !important;
+        border: 1px solid var(--accent) !important;
+        color: var(--accent) !important;
+    }
+    .stDownloadButton > button:hover {
+        background: var(--accent-soft) !important;
+    }
+
+    /* ── Breadcrumb / page context bar ────────────────────────── */
+    .page-context-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 16px;
+        margin: 0 0 16px;
+        border-radius: 10px;
+        background: rgba(7, 12, 7, 0.45);
+        border: 1px solid var(--accent-border);
+        font-size: 0.8rem;
+        color: var(--muted);
+    }
+    .page-context-bar .ctx-title {
+        font-weight: 700;
+        color: var(--accent);
+        font-size: 0.9rem;
+    }
+    .page-context-bar .ctx-meta {
+        opacity: 0.8;
+    }
+
+    /* ── Empty state styling ──────────────────────────────────── */
+    .empty-state {
+        text-align: center;
+        padding: 40px 20px;
+        color: var(--muted);
+        opacity: 0.7;
+    }
+    .empty-state .empty-icon {
+        font-size: 2.5rem;
+        margin-bottom: 8px;
+    }
+    .empty-state .empty-text {
+        font-size: 0.9rem;
+    }
+
+    /* ── Footer ───────────────────────────────────────────────── */
+    .dashboard-footer {
+        text-align: center;
+        padding: 20px 0 8px;
+        font-size: 0.7rem;
+        color: var(--muted);
+        opacity: 0.5;
+        border-top: 1px solid var(--accent-border);
+        margin-top: 40px;
+    }
+
+    /* ── Keyboard shortcut hint ───────────────────────────────── */
+    .kbd {
+        display: inline-block;
+        padding: 1px 6px;
+        border: 1px solid var(--accent-border);
+        border-radius: 4px;
+        font-size: 0.7rem;
+        color: var(--muted);
+        background: rgba(7, 12, 7, 0.5);
+        font-family: monospace;
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-cols_title = st.columns([1, 8])
-with cols_title[0]:
-    if LOGO_PATH.exists():
-        st.image(str(LOGO_PATH), width=72)
-with cols_title[1]:
+def _page_context(title: str, description: str = "", extra_html: str = "") -> None:
+    """Render a consistent page context bar at the top of each tab."""
+    meta = f'<span class="ctx-meta">{description}</span>' if description else ""
+    extra = f'<span class="ctx-meta">{extra_html}</span>' if extra_html else ""
     st.markdown(
-        """
-        <div style="display:flex; align-items:center; gap:14px; margin-bottom:4px;">
-            <h1 style="margin:0; padding:0; font-size:1.8rem; letter-spacing:-0.02em;">
-                Agent Runtime Dashboard
-            </h1>
-            <span class="pulse" style="margin-top:4px;"></span>
-        </div>
-        <div style="font-size:0.78rem; color:var(--muted); margin-top:-2px; letter-spacing:0.04em;">
-            AUTONOMOUS ENGINEERING CONTROL CENTER
-        </div>
-        """,
+        f'<div class="page-context-bar">'
+        f'<span class="ctx-title">{title}</span>'
+        f'{meta}{extra}'
+        f'</div>',
         unsafe_allow_html=True,
     )
 
-# Small spacer before tabs
-st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
-
-tabs = st.tabs([
-    "🏠 Overview", "📁 Projects", "📥 Inbox", "📄 Outputs",
-    "📈 Timeline", "⚙️ Settings", "💬 Chat", "📋 Logs",
-    "❤️ Health", "📰 Digest", "📝 Notes",
-])
 
 def _latest_file(files: Iterable[Path]) -> Path | None:
     latest: Path | None = None
@@ -499,6 +581,23 @@ def _routing_config() -> dict:
     except Exception:
         return {}
 
+def _openclaw_models() -> tuple[list[str], str]:
+    cfg_path = Path("/home/hackerman/.openclaw/openclaw.json")
+    cfg: dict = {}
+    if cfg_path.exists():
+        try:
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        except Exception:
+            cfg = {}
+    providers = cfg.get("models", {}).get("providers", {})
+    local = providers.get("local-llama", {})
+    models = [m.get("id") for m in local.get("models", []) if isinstance(m, dict) and m.get("id")]
+    primary = cfg.get("agents", {}).get("defaults", {}).get("model", {}).get("primary", "")
+    default = primary.split("/", 1)[-1] if primary else (models[0] if models else "llama-3.1-8b-instruct")
+    if default not in models:
+        models = [default] + [m for m in models if m != default]
+    return models, default
+
 def _active_provider_model() -> tuple[str, str]:
     cfg = _routing_config()
     routing = _latest_routing()
@@ -508,8 +607,8 @@ def _active_provider_model() -> tuple[str, str]:
         model = str(cfg.get("codex_model", "gpt-5.2-codex"))
     elif provider == "claude":
         model = str(cfg.get("claude_model", "claude-opus-4-6"))
-    elif provider == "ollama":
-        model = str(cfg.get("ollama_model", "llama3.2:3b"))
+    elif provider == "openai":
+        model = str(cfg.get("openai_model", "gpt-5.2"))
     return provider, model
 
 def _credit_snapshot() -> tuple[str, str]:
@@ -981,10 +1080,58 @@ def _activity_feed(limit: int = 6) -> list[dict]:
         })
     return out
 
+# ── Header (rendered after helpers are defined) ──────────────────
+cols_title = st.columns([1, 8])
+with cols_title[0]:
+    if LOGO_PATH.exists():
+        st.image(str(LOGO_PATH), width=72)
+with cols_title[1]:
+    # Compute uptime string for header
+    _hdr_last_cycle = _last_cycle_ts()
+    _hdr_uptime = ""
+    if _hdr_last_cycle:
+        _hdr_age_min = (datetime.now(timezone.utc) - _hdr_last_cycle).total_seconds() / 60.0
+        _hdr_uptime = f"{_hdr_age_min:.0f}m ago" if _hdr_age_min < 60 else f"{_hdr_age_min/60:.1f}h ago"
+    _hdr_health, _ = _read_cycle_health()
+    _hdr_health_color = "var(--accent)" if _hdr_health == "ok" else ("var(--warn)" if _hdr_health in ("warn", "unknown") else "var(--danger)")
+    st.markdown(
+        f"""
+        <div style="display:flex; align-items:center; gap:14px; margin-bottom:4px;">
+            <h1 style="margin:0; padding:0; font-size:1.8rem; letter-spacing:-0.02em;">
+                Agent Runtime Dashboard
+            </h1>
+            <span class="pulse" style="margin-top:4px;"></span>
+        </div>
+        <div style="font-size:0.78rem; color:var(--muted); margin-top:-2px; letter-spacing:0.04em;">
+            AUTONOMOUS ENGINEERING CONTROL CENTER
+            <span style="margin-left:16px; color:{_hdr_health_color}; font-weight:600;">● {_hdr_health.upper()}</span>
+            {f'<span style="margin-left:8px; opacity:0.7;">Last cycle: {_hdr_uptime}</span>' if _hdr_uptime else ''}
+        </div>
+        <div style="font-size:0.68rem; color:var(--muted); margin-top:2px; opacity:0.5;">
+            {datetime.now(PST).strftime("%A, %B %d · %H:%M PST")}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+# Small spacer before tabs
+st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
+
+tabs = st.tabs([
+    "🏠 Overview", "📁 Projects", "📥 Inbox", "📄 Outputs",
+    "📈 Timeline", "⚙️ Settings", "💬 Chat", "📋 Logs",
+    "❤️ Health", "📰 Digest", "📝 Notes",
+])
+
 _render_sidebar()
 
 with tabs[0]:
-    st.markdown('<div class="section-header">Status Snapshot</div>', unsafe_allow_html=True)
+    _page_context(
+        "System Overview",
+        "Real-time status snapshot of the agent runtime.",
+        f"Updated {datetime.now(PST).strftime('%H:%M PST')}",
+    )
+    st.markdown('<div class="section-header">📊 Status Snapshot</div>', unsafe_allow_html=True)
 
     _ov_patterns = ["claude_*.json", "review_claude_*__by_openai.json"]
     _ov_all_files = list_matching(_ov_patterns)
@@ -1086,7 +1233,7 @@ with tabs[0]:
             st.caption("No recent activity found.")
 
     with _ov_right:
-        st.markdown('<div class="section-header" style="margin-top:0;">⚠️ Recent Failures</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header" style="margin-top:0;">⚠️ Recent Issues</div>', unsafe_allow_html=True)
         failures = _recent_failures(3)
         dismissed = _load_dismissed_errors()
         if failures:
@@ -1112,7 +1259,7 @@ with tabs[0]:
             if not _any_shown:
                 st.success("All failures dismissed.")
         else:
-            st.success("No recent failures — all clear.")
+            st.success("No recent issues — all systems nominal. ✓")
 
     st.divider()
     st.markdown('<div class="section-header">🎛️ Review & Cycle Control</div>', unsafe_allow_html=True)
@@ -1164,71 +1311,62 @@ with tabs[0]:
                 st.rerun()
 
     st.markdown('<div class="section-header">🧠 Brief Me</div>', unsafe_allow_html=True)
-    st.caption("Summarize inbox and latest proposals with local Ollama.")
+    st.caption("Summarize inbox and latest proposals with the local OpenClaw agent.")
 
-    try:
-        models = list_models(timeout=4)
-        st.caption("Ollama status: reachable")
-        # warm-up ping (non-blocking on failure)
-        try:
-            from lib.ollama import generate
-            _ = generate(models[0], "ping", timeout=3) if models else ""
-        except Exception:
-            pass
-    except Exception as e:
-        models = []
-        st.error(f"Could not reach Ollama at 127.0.0.1:11434 — {e}")
-
-    if not models:
-        st.warning("No Ollama models found. Pull one: ollama pull qwen2.5-coder:3b (or similar)")
+    models, default_model = _openclaw_models()
+    if models:
+        st.caption(f"Model: {default_model}")
     else:
-        default_model = "llama3.2:3b"
-        default_index = models.index(default_model) if default_model in models else 0
-        model = st.selectbox("Model", models, index=default_index, key="brief_model")
-        if st.button("Brief me"):
-            inbox_text = inbox_raw.strip()
-            cpath = latest_claude()
-            rpath = latest_review()
+        st.warning("OpenClaw model not configured. Check ~/.openclaw/openclaw.json.")
 
-            def _json_blob(p: Path | None) -> str:
-                if not p:
-                    return "(none)"
-                try:
-                    data = read_json_file(p)
-                    return json.dumps(data, indent=2)[:12000]
-                except Exception as e:
-                    return f"(failed to read {p.name}: {e})"
+    if models and st.button("Brief me"):
+        inbox_text = inbox_raw.strip()
+        cpath = latest_claude()
+        rpath = latest_review()
 
-            prompt = (
-                "You are a private agent assistant. Summarize the inbox and the latest proposals in ONE concise paragraph.\n"
-                "Focus on: priorities, risks/blocks, and next actions.\n\n"
-                "Be specific and actionable. Use bullet points for next actions.\n\n"
-                "INBOX:\n"
-                f"{inbox_text or '(empty)'}\n\n"
-                "LATEST_CLAUDE_PROPOSAL_JSON:\n"
-                f"{_json_blob(cpath)}\n\n"
-                "LATEST_OPENAI_REVIEW_JSON:\n"
-                f"{_json_blob(rpath)}\n"
-                "\nEnd with a one-line status verdict: 🟢 All clear, 🟡 Needs attention, or 🔴 Action required."
-            )
-            with st.spinner("Generating briefing…"):
-                try:
-                    from lib.ollama import generate
-                    out = generate(model, prompt, timeout=60)
-                    st.session_state["briefing_ts"] = datetime.now(PST).strftime("%b %d, %H:%M:%S")
-                    st.session_state["briefing"] = out
-                except Exception as e:
-                    st.error(f"Briefing failed or timed out: {e}")
+        def _json_blob(p: Path | None) -> str:
+            if not p:
+                return "(none)"
+            try:
+                data = read_json_file(p)
+                return json.dumps(data, indent=2)[:12000]
+            except Exception as e:
+                return f"(failed to read {p.name}: {e})"
 
-        if "briefing" in st.session_state:
-            st.text_area("Briefing", value=st.session_state["briefing"], height=320)
-            _copy_button(st.session_state["briefing"], key="copy_briefing")
+        prompt = (
+            "You are a private agent assistant. Summarize the inbox and the latest proposals in ONE concise paragraph.\n"
+            "Focus on: priorities, risks/blocks, and next actions.\n\n"
+            "Be specific and actionable. Use bullet points for next actions.\n\n"
+            "INBOX:\n"
+            f"{inbox_text or '(empty)'}\n\n"
+            "LATEST_CLAUDE_PROPOSAL_JSON:\n"
+            f"{_json_blob(cpath)}\n\n"
+            "LATEST_OPENAI_REVIEW_JSON:\n"
+            f"{_json_blob(rpath)}\n"
+            "\nEnd with a one-line status verdict: 🟢 All clear, 🟡 Needs attention, or 🔴 Action required."
+        )
+        with st.spinner("Generating briefing…"):
+            try:
+                out = generate(default_model, prompt, timeout=90)
+                st.session_state["briefing_ts"] = datetime.now(PST).strftime("%b %d, %H:%M:%S")
+                st.session_state["briefing"] = out
+            except Exception as e:
+                st.error(f"Briefing failed or timed out: {e}")
 
-            if "briefing_ts" in st.session_state:
-                st.caption(f"Generated at {st.session_state['briefing_ts']}")
+    if "briefing" in st.session_state:
+        st.text_area("Briefing", value=st.session_state["briefing"], height=320)
+        _copy_button(st.session_state["briefing"], key="copy_briefing")
+
+        if "briefing_ts" in st.session_state:
+            st.caption(f"Generated at {st.session_state['briefing_ts']}")
     st.markdown('<div class="section-header">📂 Project Overview</div>', unsafe_allow_html=True)
     projects_root = Path("/home/hackerman/agent-runtime/workspace/projects")
-    projects = [p for p in projects_root.iterdir() if p.is_dir()]
+    projects = []
+    if projects_root.exists():
+        projects = [p for p in projects_root.iterdir() if p.is_dir()]
+    else:
+        st.warning("Projects directory not found.")
+        projects = []
 
     def _project_status(p: Path) -> tuple[str, str]:
         status_path = p / "status.json"
@@ -1256,7 +1394,13 @@ with tabs[0]:
         return None
 
     if not projects:
-        st.info("No projects found.")
+        st.markdown(
+            '<div class="empty-state">'
+            '<div class="empty-icon">📂</div>'
+            '<div class="empty-text">No projects found yet. Projects will appear here once the agent starts working.</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
     else:
         def _thumb_data(p: Path) -> str | None:
             candidates = [
@@ -1313,35 +1457,51 @@ with tabs[0]:
                 st.code("\n".join(item["lines"]), language="text")
 
 with tabs[1]:
-    st.subheader("Projects")
-    projects_root = Path("/home/hackerman/agent-runtime/workspace/projects")
-    projects = [p for p in projects_root.iterdir() if p.is_dir()]
+    _page_context(
+        "Projects",
+        "All workspace projects with status and recent changes.",
+    )
 
-    def _read_lines(path: Path, max_lines: int = 6) -> list[str]:
+    _proj_root = Path("/home/hackerman/agent-runtime/workspace/projects")
+    _proj_list = []
+    if _proj_root.exists():
+        _proj_list = [p for p in _proj_root.iterdir() if p.is_dir()]
+
+    def _read_lines_safe(path: Path, max_lines: int = 6) -> list[str]:
         try:
             lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
             return [ln for ln in lines if ln.strip()][:max_lines]
         except Exception:
             return []
 
-    def _project_status(p: Path) -> tuple[str, str]:
+    def _project_status_fn(p: Path) -> tuple[str, str]:
         status_path = p / "status.json"
         if status_path.exists():
             try:
                 data = json.loads(status_path.read_text(encoding="utf-8"))
-                status = data.get("status", "UNKNOWN")
-                ts = data.get("timestamp", "")
-                return status, ts
+                return data.get("status", "UNKNOWN"), data.get("timestamp", "")
             except Exception:
                 return "UNKNOWN", ""
         return "UNKNOWN", ""
 
-    def _recent_updates() -> list[dict]:
+    def _project_recent_changes(p: Path) -> list[str]:
+        changelog = p / "CHANGELOG.md"
+        if changelog.exists():
+            return _read_lines_safe(changelog, 6)
+        return []
+
+    def _project_file_count(p: Path) -> int:
+        try:
+            return sum(1 for f in p.rglob("*") if f.is_file() and not f.name.startswith("."))
+        except Exception:
+            return 0
+
+    def _recent_updates_projects() -> list[dict]:
         items = []
-        for p in projects:
+        for p in _proj_list:
             changelog = p / "CHANGELOG.md"
             if changelog.exists():
-                lines = _read_lines(changelog, 8)
+                lines = _read_lines_safe(changelog, 8)
                 if lines:
                     items.append({
                         "project": p.name,
@@ -1350,40 +1510,139 @@ with tabs[1]:
                     })
         return sorted(items, key=lambda x: x["mtime"], reverse=True)
 
-    if not projects:
-        st.info("No projects found.")
+    if not _proj_list:
+        st.markdown(
+            '<div class="empty-state">'
+            '<div class="empty-icon">📂</div>'
+            '<div class="empty-text">No projects found. Projects will appear here once the agent starts working.</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
     else:
-        cols = st.columns([2, 3])
-        with cols[0]:
-            st.markdown("**Project status**")
-            for p in sorted(projects):
-                status, ts = _project_status(p)
-                last_mod = datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
-                st.markdown(f"**{p.name}**")
-                st.caption(f"Status: {status} · Updated: {_fmt_time(ts) if ts else _fmt_mtime(p)}")
-                done_path = p / "DONE.md"
-                if done_path.exists():
-                    st.caption("DONE.md present")
-                st.divider()
-        with cols[1]:
-            st.markdown("**Recent updates (plaintext)**")
-            updates = _recent_updates()
-            if not updates:
-                st.info("No CHANGELOG entries found.")
-            for item in updates[:10]:
-                st.markdown(f"**{item['project']}**")
-                st.code("\n".join(item["lines"]), language="text")
+        # Summary stats
+        _proj_active = [p for p in _proj_list if _project_status_fn(p)[0] == "IN_PROGRESS"]
+        _proj_done = [p for p in _proj_list if _project_status_fn(p)[0] == "DONE"]
+        _proj_review = [p for p in _proj_list if _project_status_fn(p)[0] == "PENDING_HUMAN_REVIEW"]
+
+        st.markdown(
+            f"""
+            <div class="hero-grid">
+                <div class="hero-stat"><div class="value">{len(_proj_list)}</div><div class="label">Total Projects</div></div>
+                <div class="hero-stat"><div class="value">{len(_proj_active)}</div><div class="label">Active</div></div>
+                <div class="hero-stat"><div class="value">{len(_proj_review)}</div><div class="label">Needs Review</div></div>
+                <div class="hero-stat"><div class="value">{len(_proj_done)}</div><div class="label">Completed</div></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # Filter / sort controls
+        _proj_filter_cols = st.columns([2, 2, 1])
+        with _proj_filter_cols[0]:
+            _proj_search = st.text_input("Search projects", key="proj_search", placeholder="Filter by name…")
+        with _proj_filter_cols[1]:
+            _proj_status_filter = st.selectbox(
+                "Status filter",
+                ["All", "IN_PROGRESS", "DONE", "PENDING_HUMAN_REVIEW", "UNKNOWN"],
+                key="proj_status_filter",
+            )
+        with _proj_filter_cols[2]:
+            _proj_sort = st.selectbox("Sort", ["Recent first", "Name A→Z"], key="proj_sort")
+
+        # Apply filters
+        _proj_filtered = _proj_list[:]
+        if _proj_search:
+            _proj_filtered = [p for p in _proj_filtered if _proj_search.lower() in p.name.lower()]
+        if _proj_status_filter != "All":
+            _proj_filtered = [p for p in _proj_filtered if _project_status_fn(p)[0] == _proj_status_filter]
+        if _proj_sort == "Name A→Z":
+            _proj_filtered.sort(key=lambda p: p.name.lower())
+        else:
+            _proj_filtered.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+
+        st.markdown(f'<div class="section-header">📂 Projects ({len(_proj_filtered)})</div>', unsafe_allow_html=True)
+
+        if not _proj_filtered:
+            st.caption("No projects match your filters.")
+        else:
+            # Project cards as glass cards
+            _proj_cards_html = []
+            for p in _proj_filtered[:12]:
+                status, ts = _project_status_fn(p)
+                file_count = _project_file_count(p)
+                has_done = (p / "DONE.md").exists()
+                has_changelog = (p / "CHANGELOG.md").exists()
+
+                status_variant = "ok" if status == "IN_PROGRESS" else ("warn" if status == "PENDING_HUMAN_REVIEW" else ("ok" if status == "DONE" else "neutral"))
+                status_icon = {"IN_PROGRESS": "🔄", "DONE": "✅", "PENDING_HUMAN_REVIEW": "⏳"}.get(status, "❓")
+                badges = f'<span class="status-chip {status_variant}">{status_icon} {status}</span>'
+                if has_done:
+                    badges += ' <span class="status-chip ok">📋 DONE.md</span>'
+
+                _proj_cards_html.append(
+                    f"""
+                    <div class="glass-card">
+                        <div class="glass-title" style="font-size:1.05rem;">{p.name}</div>
+                        <div style="margin:6px 0 8px;">{badges}</div>
+                        <div class="glass-meta">Updated: {_fmt_time(ts) if ts else _fmt_mtime(p)}</div>
+                        <div class="glass-meta">{file_count} files{'  ·  has changelog' if has_changelog else ''}</div>
+                    </div>
+                    """
+                )
+            st.markdown(f'<div class="glass-grid">{"".join(_proj_cards_html)}</div>', unsafe_allow_html=True)
+
+            # Expandable detail for each project
+            st.markdown('<div class="section-header">📋 Project Details</div>', unsafe_allow_html=True)
+            for p in _proj_filtered[:12]:
+                status, ts = _project_status_fn(p)
+                changes = _project_recent_changes(p)
+                with st.expander(f"**{p.name}** — {status} · {_fmt_time(ts) if ts else _fmt_mtime(p)}", expanded=False):
+                    _det_cols = st.columns([1, 1])
+                    with _det_cols[0]:
+                        st.caption(f"Path: `{p}`")
+                        st.caption(f"Files: {_project_file_count(p)}")
+                        st.caption(f"Last modified: {_fmt_mtime(p)}")
+                        if (p / "DONE.md").exists():
+                            st.caption("✅ DONE.md present")
+                    with _det_cols[1]:
+                        if changes:
+                            st.markdown("**Recent changelog**")
+                            st.code("\n".join(changes), language="text")
+                        else:
+                            st.caption("No changelog entries yet.")
+
+        # Global recent updates feed
+        st.divider()
+        st.markdown('<div class="section-header">📡 Recent Updates Across Projects</div>', unsafe_allow_html=True)
+        _proj_updates = _recent_updates_projects()
+        if not _proj_updates:
+            st.caption("No recent changelog entries found.")
+        else:
+            for item in _proj_updates[:8]:
+                with st.expander(f"**{item['project']}** · {datetime.fromtimestamp(item['mtime'], tz=timezone.utc).astimezone(PST).strftime('%b %d, %H:%M')}", expanded=False):
+                    st.code("\n".join(item["lines"]), language="text")
 
 with tabs[2]:
-    st.subheader("Inbox (directives/priorities/00_inbox.md)")
+    _page_context(
+        "Inbox",
+        "Agent directives and priorities — edit and save to guide the next cycle.",
+    )
+
     inbox = st.text_area("Edit", value=read_inbox(), height=420)
     if st.button("Save inbox"):
         write_inbox(inbox)
         st.success("Inbox saved")
 
 with tabs[4]:
-    st.subheader("Latest outputs")
-    st.caption("Browse proposals and reviews with a master-detail view.")
+    _page_context(
+        "Outputs Library",
+        "Browse proposals and reviews with search, filtering, and detail view.",
+    )
+
+    st.markdown(
+        '<div style="font-size:0.82rem; color:var(--muted); margin-bottom:12px;">Tip: use the search box to filter by filename, then click any item to see full details.</div>',
+        unsafe_allow_html=True,
+    )
     patterns = ["claude_*.json", "review_claude_*__by_openai.json"]
     all_files = list_matching(patterns)
 
@@ -1424,7 +1683,13 @@ with tabs[4]:
     filtered = [p for p in all_files if query.lower() in p.name.lower()] if query else all_files
 
     if not filtered:
-        st.info("No matching proposal files found.")
+        st.markdown(
+            '<div class="empty-state">'
+            '<div class="empty-icon">📄</div>'
+            '<div class="empty-text">No matching proposal files found. Adjust your search or wait for the next cycle.</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
     else:
         claude_files = [p for p in all_files if p.name.startswith("claude_")]
         review_files = [p for p in all_files if p.name.startswith("review_claude_")]
@@ -1528,7 +1793,11 @@ with tabs[4]:
                     st.code(p.read_text(encoding="utf-8")[:12000])
 
 with tabs[3]:
-    st.subheader("Timeline")
+    _page_context(
+        "Timeline",
+        "Proposal activity over time — daily, weekly, and monthly breakdowns.",
+    )
+
     patterns = ["claude_*.json", "review_claude_*__by_openai.json"]
     files = list_matching(patterns)
 
@@ -1571,7 +1840,13 @@ with tabs[3]:
         return dict(sorted(counts.items()))
 
     if not files:
-        st.info("No proposal files found yet.")
+        st.markdown(
+            '<div class="empty-state">'
+            '<div class="empty-icon">📈</div>'
+            '<div class="empty-text">No proposal files found yet. The timeline will populate as the agent generates proposals.</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
     else:
         st.write(f"Total proposals: {len(files)}")
         last_14 = _counts_last_days(14)
@@ -1602,7 +1877,11 @@ with tabs[3]:
         _render_table("Per month", month_counts)
 
 with tabs[5]:
-    st.subheader("Control")
+    _page_context(
+        "Settings & Control",
+        "Agent mode, diagnostics, and review controls.",
+    )
+
     current_mode = read_mode()
     mode = st.radio("Mode", ["DIRECTED", "AUTONOMOUS"], index=0 if current_mode=="DIRECTED" else 1)
     if mode != current_mode:
@@ -1620,16 +1899,15 @@ with tabs[5]:
     st.markdown(f"**Credits & usage**: {credit_status.upper()} · Provider: {provider.upper() if provider else 'UNKNOWN'} · Model: {model}")
     st.caption(credit_note)
     if st.button("Test Brief me (fast)"):
-        try:
-            models = list_models(timeout=4)
-            if not models:
-                st.error("No Ollama models available.")
-            else:
-                from lib.ollama import generate
-                out = generate(models[0], "Reply with: OK", timeout=10)
+        models, default_model = _openclaw_models()
+        if not models:
+            st.error("OpenClaw model not configured.")
+        else:
+            try:
+                out = generate(default_model, "Reply with: OK", timeout=30)
                 st.success(f"Brief me test OK: {out.strip()[:50]}")
-        except Exception as e:
-            st.error(f"Brief me test failed: {e}")
+            except Exception as e:
+                st.error(f"Brief me test failed: {e}")
 
     st.divider()
     st.subheader("Review controls")
@@ -1652,15 +1930,14 @@ with tabs[5]:
             _confirm_continue()
 
 with tabs[6]:
-    st.subheader("Local Ollama chat")
-    try:
-        models = list_models()
-    except Exception as e:
-        models = []
-        st.error(f"Could not reach Ollama at 127.0.0.1:11434 — {e}")
+    _page_context(
+        "AI Chat",
+        "Conversational interface powered by the local OpenClaw agent.",
+    )
 
+    models, default_model = _openclaw_models()
     if not models:
-        st.warning("No Ollama models found. Pull one: ollama pull qwen2.5-coder:3b (or similar)")
+        st.error("OpenClaw model not configured. Check ~/.openclaw/openclaw.json.")
     else:
         if "chat_history" not in st.session_state:
             st.session_state["chat_history"] = []
@@ -1670,13 +1947,13 @@ with tabs[6]:
             for msg in st.session_state["chat_history"][-10:]:
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
-        model = st.selectbox("Model", models, index=0)
+        model = st.selectbox("Model", models, index=models.index(default_model) if default_model in models else 0)
 
         # Use session state for prompt to survive quick-prompt reruns
         _default_prompt = st.session_state.pop("_qp_prompt", "")
         prompt = st.text_area("Prompt", value=_default_prompt, height=220, help="Ask anything (local-only).", key="chat_prompt_area")
         if _default_prompt:
-            st.info("Quick prompt loaded — click 'Send to Ollama' to run it.")
+            st.info("Quick prompt loaded — click 'Send to OpenClaw' to run it.")
         
         # Contextual quick prompts
         st.markdown("**Quick prompts**")
@@ -1713,12 +1990,12 @@ with tabs[6]:
                 st.session_state["_qp_prompt"] = prompt
                 st.rerun()
 
-        if st.button("Send to Ollama"):
+        if st.button("Send to OpenClaw"):
             if not prompt.strip():
                 st.warning("Type a prompt first.")
             else:
                 with st.spinner("Thinking..."):
-                    out = chat(model, prompt)
+                    out = chat(model, prompt, timeout=90)
                 st.session_state["chat_history"].append({"role": "user", "content": prompt})
                 st.session_state["chat_history"].append({"role": "assistant", "content": out})
                 st.rerun()
@@ -1737,7 +2014,11 @@ with tabs[6]:
                 st.code(export, language="markdown")
 
 with tabs[7]:
-    st.subheader("System Logs")
+    _page_context(
+        "System Logs",
+        "Browse and inspect recent log files from the agent runtime.",
+    )
+
     st.caption("Browse recent log files from the agent runtime.")
 
     logs_dir = Path("/home/hackerman/agent-runtime/logs")
@@ -1827,8 +2108,11 @@ with tabs[7]:
                     st.rerun()
 
 with tabs[8]:
-    st.subheader("System Health")
-    st.caption("At-a-glance reliability metrics and recent cycle history.")
+    _page_context(
+        "System Health",
+        "Reliability metrics, cycle frequency, and patch success rates.",
+    )
+
 
     # ── Cycle stats ──────────────────────────────────────────────
     cycle_log = Path("/home/hackerman/agent-runtime/logs/dashboard_cycle.jsonl")
@@ -1943,25 +2227,27 @@ with tabs[8]:
                 if stderr:
                     st.code(stderr, language="text")
 
-    # ── Ollama connectivity ──────────────────────────────────────
+    # ── OpenClaw connectivity ────────────────────────────────────
     st.divider()
-    st.markdown("**Ollama connectivity**")
-    try:
-        _models = list_models(timeout=4)
-        if _models:
-            st.success(f"Ollama reachable — {len(_models)} model(s): {', '.join(_models[:5])}")
-        else:
-            st.warning("Ollama reachable but no models loaded.")
-    except Exception as exc:
-        st.error(f"Ollama unreachable: {exc}")
+    st.markdown("**OpenClaw connectivity**")
+    _models, _default_model = _openclaw_models()
+    if not _models:
+        st.error("OpenClaw model not configured.")
+    else:
+        st.success(f"OpenClaw ready — default model: {_default_model}")
+        st.caption(f"Models in config: {', '.join(_models[:5])}")
 
     if st.button("Refresh health", key="health_refresh"):
         st.rerun()
 
 
 with tabs[9]:
-    st.subheader("Daily Digest")
-    st.caption("A comprehensive summary of recent agent activity, generated locally via Ollama.")
+    _page_context(
+        "Daily Digest",
+        "AI-generated summary of recent agent activity.",
+    )
+
+    st.caption("A comprehensive summary of recent agent activity, generated via the local OpenClaw agent.")
 
     def _gather_digest_context(days: int = 1) -> str:
         """Collect recent events, inbox, and changelog entries for digest."""
@@ -2038,13 +2324,9 @@ with tabs[9]:
 
         return "\n\n".join(parts) if parts else "(no data available)"
 
-    try:
-        digest_models = list_models(timeout=4)
-    except Exception:
-        digest_models = []
-
+    digest_models, _digest_default = _openclaw_models()
     if not digest_models:
-        st.warning("No Ollama models available. Pull one to enable digest generation.")
+        st.warning("OpenClaw model not configured. Add it to enable digest generation.")
     else:
         d_col1, d_col2 = st.columns([2, 1])
         with d_col1:
@@ -2065,8 +2347,7 @@ with tabs[9]:
             )
             with st.spinner("Generating digest…"):
                 try:
-                    from lib.ollama import generate
-                    digest_out = generate(digest_model, digest_prompt, timeout=30)
+                    digest_out = generate(digest_model, digest_prompt, timeout=120)
                     st.session_state["digest"] = digest_out
                     st.session_state["digest_ts"] = datetime.now(PST).strftime("%b %d, %H:%M:%S")
                 except Exception as e:
@@ -2090,8 +2371,11 @@ with tabs[9]:
 
 # ── Notes tab ────────────────────────────────────────────────────
 with tabs[10]:
-    st.subheader("Notes & Scratchpad")
-    st.caption("Persistent notes for yourself. Pinned note shows in the sidebar.")
+    _page_context(
+        "Notes & Scratchpad",
+        "Persistent notes for yourself. Pinned note shows in the sidebar.",
+    )
+
 
     _notes_dir = APP_ROOT / "notes"
     _notes_dir.mkdir(exist_ok=True)
@@ -2106,8 +2390,13 @@ with tabs[10]:
             _pin_current = _pin_path.read_text(encoding="utf-8", errors="ignore")
         except Exception:
             pass
-    _pin_new = st.text_area("Pinned note", value=_pin_current, height=100, key="pinned_note_edit",
-                            placeholder="e.g. 'Focus on health tab styling today'")
+    _pin_new = st.text_area(
+        "Pinned note",
+        value=_pin_current,
+        height=100,
+        key="pinned_note_edit",
+        help="Example: focus on health tab styling today",
+    )
     if st.button("Save pinned note", key="save_pin"):
         try:
             _pin_path.write_text(_pin_new, encoding="utf-8")
@@ -2122,8 +2411,12 @@ with tabs[10]:
     st.markdown("### 📝 Scratchpad")
     st.caption("Quick timestamped notes. Saved as individual files.")
 
-    _new_note = st.text_area("New note", height=120, key="new_scratch_note",
-                             placeholder="Type a note and click Save…")
+    _new_note = st.text_area(
+        "New note",
+        height=120,
+        key="new_scratch_note",
+        help="Type a note and click Save.",
+    )
     if st.button("Save note", key="save_scratch"):
         if _new_note.strip():
             ts = datetime.now(timezone.utc)
@@ -2167,6 +2460,15 @@ with tabs[10]:
                 st.caption(f"Could not read {_np.name}")
     else:
         st.caption("No saved notes yet.")
+
+# ── Footer ───────────────────────────────────────────────────────
+st.markdown(
+    f'<div class="dashboard-footer">'
+    f'Agent Runtime Dashboard · {datetime.now(PST).strftime("%Y-%m-%d %H:%M PST")} · '
+    f'Autonomous Engineering Control Center'
+    f'</div>',
+    unsafe_allow_html=True,
+)
 
 # Auto-refresh implementation
 if st.session_state.get("auto_refresh"):
