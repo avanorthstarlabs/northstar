@@ -35,7 +35,7 @@ with cols_title[0]:
 with cols_title[1]:
     st.title("Agent Runtime Dashboard")
 
-tabs = st.tabs(["Overview", "Projects", "Inbox", "Outputs", "Timeline", "Settings", "Chat", "Logs"])
+tabs = st.tabs(["Overview", "Projects", "Inbox", "Outputs", "Timeline", "Settings", "Chat", "Logs", "Health"])
 
 def _latest_file(files: Iterable[Path]) -> Path | None:
     latest: Path | None = None
@@ -93,6 +93,34 @@ def _read_cycle_health() -> tuple[str, str]:
         last_reason = "failed to parse cycle log"
     return last_status, last_reason
 
+def _last_cycle_ts() -> datetime | None:
+    log_path = Path("/home/hackerman/agent-runtime/logs/dashboard_cycle.jsonl")
+    if not log_path.exists():
+        return None
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        for line in reversed(lines[-400:]):
+            if "\"event\": \"cycle_start\"" in line or "\"event\": \"autopatch\"" in line:
+                try:
+                    obj = json.loads(line)
+                    ts = obj.get("ts")
+                    if ts:
+                        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                except Exception:
+                    continue
+    except Exception:
+        return None
+    return None
+
+def _touch_trigger(note: str) -> None:
+    trigger_path = Path("/home/hackerman/agent-runtime/directives/priorities/.trigger")
+    try:
+        ts = datetime.now(timezone.utc).isoformat()
+        with trigger_path.open("a", encoding="utf-8") as f:
+            f.write(f"{note} {ts}\n")
+    except Exception:
+        pass
+
 def _latest_patch_name() -> str:
     logs = Path("/home/hackerman/agent-runtime/logs")
     if not logs.exists():
@@ -149,6 +177,7 @@ def _confirm_continue():
             json.dumps({"status": "IN_PROGRESS", "timestamp": datetime.now(timezone.utc).isoformat(), "reason": "needs more work"}, indent=2),
             encoding="utf-8",
         )
+        _touch_trigger("continue_work")
         st.warning("Set to IN_PROGRESS")
         st.rerun()
     if c2.button("Cancel"):
@@ -229,20 +258,88 @@ def _failure_row(text: str) -> None:
     """
     components.html(html, height=90, width=1200)
 
-def _agent_activity() -> tuple[str, str]:
-    log_path = Path("/home/hackerman/agent-runtime/logs/router_events.jsonl")
-    if not log_path.exists():
-        return "unknown", "router log missing"
+def _summarize_event(evt: dict) -> str:
+    event = evt.get("event", "")
+    if event == "proposal_ok":
+        return f"Claude drafted a proposal ({evt.get('proposal_id','unknown')})."
+    if event == "review_written":
+        return "Codex reviewed the proposal."
+    if event == "proposal_skipped":
+        return "No new projects; proposal step skipped."
+    if event == "executor_run":
+        code = evt.get("returncode")
+        return "Applied a patch and ran checks." if code == 0 else "Cycle failed during patch/checks."
+    if event == "autopatch":
+        code = evt.get("returncode")
+        return "Autopatch succeeded." if code == 0 else "Autopatch failed."
+    if event == "check":
+        name = evt.get("name", "check")
+        return f"Validation check: {name} {'passed' if evt.get('passed') else 'failed'}."
+    if event == "done":
+        return "Marked ready for review."
+    if event == "in_progress":
+        return "Cycle completed; continuing work."
+    if event == "routing":
+        provider = evt.get("provider", "unknown")
+        return f"Routed this cycle to {provider.upper()}."
+    return "Activity updated."
+
+
+def _parse_event_lines(path: Path, limit: int = 200) -> list[dict]:
+    if not path.exists():
+        return []
+    items: list[dict] = []
     try:
-        lines = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
-        for line in reversed(lines[-200:]):
-            if "\"event\": \"proposal_ok\"" in line or "\"event\": \"executor_run\"" in line:
-                return "active", "agents recently processed a cycle"
-            if "\"event\": \"proposal_skipped\"" in line:
-                return "idle", "no new projects; proposals skipped"
-        return "idle", "no recent agent activity found"
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        for line in reversed(lines[-limit:]):
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            if "event" in obj:
+                items.append(obj)
     except Exception:
-        return "unknown", "failed to parse router log"
+        return []
+    return items
+
+
+def _agent_activity() -> tuple[str, str]:
+    router_path = Path("/home/hackerman/agent-runtime/logs/router_events.jsonl")
+    cycle_path = Path("/home/hackerman/agent-runtime/logs/dashboard_cycle.jsonl")
+    router_items = _parse_event_lines(router_path, limit=200)
+    cycle_items = _parse_event_lines(cycle_path, limit=400)
+    items = router_items[:5] + cycle_items[:5]
+    if not items:
+        return "unknown", "no activity logs found"
+    # Pick the most recent timestamp
+    def _ts(obj: dict) -> str:
+        return obj.get("ts", "")
+    items.sort(key=_ts, reverse=True)
+    latest = items[0]
+    summary = _summarize_event(latest)
+    status = "active"
+    if latest.get("event") in ("proposal_skipped",) or "no activity" in summary.lower():
+        status = "idle"
+    return status, summary
+
+
+def _activity_feed(limit: int = 6) -> list[dict]:
+    router_path = Path("/home/hackerman/agent-runtime/logs/router_events.jsonl")
+    cycle_path = Path("/home/hackerman/agent-runtime/logs/dashboard_cycle.jsonl")
+    items = _parse_event_lines(router_path, limit=200) + _parse_event_lines(cycle_path, limit=400)
+    if not items:
+        return []
+    def _ts(obj: dict) -> str:
+        return obj.get("ts", "")
+    items.sort(key=_ts, reverse=True)
+    out = []
+    for obj in items[:limit]:
+        ts = obj.get("ts", "")
+        out.append({
+            "ts": ts,
+            "summary": _summarize_event(obj),
+        })
+    return out
 
 with tabs[0]:
     st.markdown(
@@ -338,6 +435,13 @@ with tabs[0]:
         """,
         unsafe_allow_html=True,
     )
+    feed = _activity_feed(limit=6)
+    if feed:
+        st.markdown("**Live activity**")
+        for item in feed:
+            st.markdown(f"- {_fmt_time(item['ts'])} · {item['summary']}")
+    else:
+        st.caption("No recent activity found.")
 
     st.divider()
     st.markdown("**Action required**")
@@ -360,6 +464,23 @@ with tabs[0]:
                 _confirm_continue()
     else:
         st.caption("No review actions needed right now.")
+
+    # Cycle override indicator (only when idle/stale)
+    last_cycle = _last_cycle_ts()
+    if last_cycle:
+        age_min = (datetime.now(timezone.utc) - last_cycle).total_seconds() / 60.0
+        if age_min >= 30:
+            st.warning(f"Cycle looks idle. Last run: {_fmt_time(last_cycle.isoformat())}")
+            if st.button("Kick cycle now"):
+                _touch_trigger("manual_kick")
+                st.success("Triggered a new cycle.")
+                st.rerun()
+    else:
+        st.info("No cycle history yet.")
+        if st.button("Kick cycle now"):
+            _touch_trigger("manual_kick")
+            st.success("Triggered a new cycle.")
+            st.rerun()
 
     st.subheader("Brief me")
     st.write("Summarize inbox and latest proposals with local Ollama.")
@@ -896,3 +1017,135 @@ with tabs[7]:
 
                 if st.button("Refresh", key="log_refresh"):
                     st.rerun()
+
+with tabs[8]:
+    st.subheader("System Health")
+    st.caption("At-a-glance reliability metrics and recent cycle history.")
+
+    # ── Cycle stats ──────────────────────────────────────────────
+    cycle_log = Path("/home/hackerman/agent-runtime/logs/dashboard_cycle.jsonl")
+
+    def _parse_cycle_events(limit: int = 500) -> list[dict]:
+        if not cycle_log.exists():
+            return []
+        events: list[dict] = []
+        try:
+            lines = cycle_log.read_text(encoding="utf-8", errors="ignore").splitlines()
+            for line in reversed(lines[-limit:]):
+                try:
+                    events.append(json.loads(line))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return events
+
+    cycle_events = _parse_cycle_events(500)
+
+    autopatch_events = [e for e in cycle_events if e.get("event") == "autopatch"]
+    successes = [e for e in autopatch_events if e.get("returncode") == 0]
+    failures_list = [e for e in autopatch_events if e.get("returncode") != 0]
+
+    total_patches = len(autopatch_events)
+    success_count = len(successes)
+    fail_count = len(failures_list)
+    success_rate = (success_count / total_patches * 100) if total_patches else 0
+
+    h_cols = st.columns(4)
+    h_cols[0].metric("Total patches", total_patches)
+    h_cols[1].metric("Succeeded", success_count)
+    h_cols[2].metric("Failed", fail_count)
+    h_cols[3].metric("Success rate", f"{success_rate:.0f}%")
+
+    # ── Uptime / cycle frequency ─────────────────────────────────
+    cycle_starts = [e for e in cycle_events if e.get("event") == "cycle_start"]
+
+    def _ts_dt(obj: dict) -> datetime | None:
+        ts = obj.get("ts", "")
+        if not ts:
+            return None
+        try:
+            s = ts.replace("Z", "+00:00")
+            return datetime.fromisoformat(s)
+        except Exception:
+            return None
+
+    if cycle_starts:
+        recent_starts = []
+        for cs in cycle_starts[:50]:
+            dt = _ts_dt(cs)
+            if dt:
+                recent_starts.append(dt)
+        if len(recent_starts) >= 2:
+            recent_starts.sort()
+            gaps = [(recent_starts[i+1] - recent_starts[i]).total_seconds() / 60.0
+                    for i in range(len(recent_starts) - 1)]
+            avg_gap = sum(gaps) / len(gaps)
+            min_gap = min(gaps)
+            max_gap = max(gaps)
+            st.markdown("**Cycle frequency** (recent)")
+            freq_cols = st.columns(3)
+            freq_cols[0].metric("Avg interval", f"{avg_gap:.1f} min")
+            freq_cols[1].metric("Min interval", f"{min_gap:.1f} min")
+            freq_cols[2].metric("Max interval", f"{max_gap:.1f} min")
+        else:
+            st.caption("Not enough cycle starts to compute frequency.")
+    else:
+        st.caption("No cycle_start events found.")
+
+    # ── Daily success/fail chart ─────────────────────────────────
+    st.divider()
+    st.markdown("**Daily patch outcomes (last 14 days)**")
+
+    today = datetime.now(timezone.utc).date()
+    day_labels = [(today - timedelta(days=i)).isoformat() for i in range(13, -1, -1)]
+    day_ok: dict[str, int] = {d: 0 for d in day_labels}
+    day_fail: dict[str, int] = {d: 0 for d in day_labels}
+
+    for e in autopatch_events:
+        dt = _ts_dt(e)
+        if not dt:
+            continue
+        d = dt.date().isoformat()
+        if d in day_ok:
+            if e.get("returncode") == 0:
+                day_ok[d] += 1
+            else:
+                day_fail[d] += 1
+
+    import pandas as pd
+    chart_df = pd.DataFrame({
+        "Succeeded": day_ok,
+        "Failed": day_fail,
+    })
+    st.bar_chart(chart_df)
+
+    # ── Recent failures detail ───────────────────────────────────
+    st.divider()
+    st.markdown("**Recent failures**")
+    if not failures_list:
+        st.success("No recent failures — all patches succeeded.")
+    else:
+        for evt in failures_list[:5]:
+            ts = evt.get("ts", "")
+            rc = evt.get("returncode", "?")
+            stderr = evt.get("stderr", "")[:300]
+            with st.expander(f"{_fmt_time(ts)} · rc={rc}", expanded=False):
+                st.json(evt)
+                if stderr:
+                    st.code(stderr, language="text")
+
+    # ── Ollama connectivity ──────────────────────────────────────
+    st.divider()
+    st.markdown("**Ollama connectivity**")
+    try:
+        _models = list_models(timeout=4)
+        if _models:
+            st.success(f"Ollama reachable — {len(_models)} model(s): {', '.join(_models[:5])}")
+        else:
+            st.warning("Ollama reachable but no models loaded.")
+    except Exception as exc:
+        st.error(f"Ollama unreachable: {exc}")
+
+    if st.button("Refresh health", key="health_refresh"):
+        st.rerun()

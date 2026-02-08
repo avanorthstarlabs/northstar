@@ -8,6 +8,7 @@ RUNTIME = Path("/home/hackerman/agent-runtime")
 PROPOSALS = RUNTIME / "planner" / "proposals"
 WORK_ORDER = RUNTIME / "directives" / "priorities" / "dashboard_autobuild.md"
 CHANGELOG = DASH / "CHANGELOG.md"
+QUALITY_GATE = RUNTIME / "constitution" / "quality_gate.md"
 LOGS = RUNTIME / "logs"
 LOGS.mkdir(parents=True, exist_ok=True)
 
@@ -214,6 +215,7 @@ def main():
 
     work = WORK_ORDER.read_text(encoding="utf-8") if WORK_ORDER.exists() else ""
     context = read_latest_outputs()
+    quality_gate = QUALITY_GATE.read_text(encoding="utf-8") if QUALITY_GATE.exists() else ""
 
     app_text = (DASH / "app.py").read_text(encoding="utf-8")
 
@@ -241,6 +243,9 @@ Current app.py (verbatim):
 
 Work order:
 {work}
+
+General quality gate:
+{quality_gate}
 
 Recent agent outputs (for grounding):
 {context}
