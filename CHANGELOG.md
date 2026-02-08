@@ -108,3 +108,36 @@
 ## 2026-02-08T03:05:11.559969+00:00
 - Applied patch: dashboard_patch_2026-02-08T03-05-05.264490+00-00.diff
 
+## 2026-02-08T04:13:30Z
+- Applied manual UX overhaul CSS/tabs updates and cleaned redundant styles.
+- Normalized recent errors card styling and copy button layout.
+
+## 2026-02-08T05:12:45Z
+- Autopatch: accept full-file app.py fallback (BEGIN_APP_PY/END_APP_PY) to reduce model diff failures.
+
+## 2026-02-08T05:20:10Z
+- Autopatch: added retry hardening, safe file reads, and structured failure logging.
+
+## 2026-02-08T05:27:30Z
+- Autopatch: force full-file fallback on retry to avoid corrupt diffs.
+
+## 2026-02-08T05:33:10Z
+- Autopatch: allow higher token limits for full-file fallback to avoid truncation.
+
+## 2026-02-08T05:39:20Z
+- Autopatch: add API timeouts to avoid hanging runs.
+
+## 2026-02-08T05:46:40Z
+- Autopatch: configurable token budgets and more focused patch scope to reduce truncation.
+
+## 2026-02-08T05:49:30Z
+- Autopatch: fix token-budget loop indentation bug.
+
+## 2026-02-08T06:01:10Z
+- Autopatch: default OpenAI model set to gpt-5.2-codex when AUTOPATCH_MODEL not provided.
+
+## 2026-02-08T06:07:40Z
+- Autopatch: fall back to non-3way git apply when index mismatch blocks patching.
+## 2026-02-08T05:24:44.562580+00:00
+- Applied patch: dashboard_patch_2026-02-08T05-24-38.914061+00-00.diff
+

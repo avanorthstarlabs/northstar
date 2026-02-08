@@ -27,7 +27,85 @@ ICON_PATH = APP_ROOT / "assets" / "icon.png"
 PST = ZoneInfo("America/Los_Angeles")
 
 page_icon = str(ICON_PATH) if ICON_PATH.exists() else ":)"
-st.set_page_config(page_title="Agent Runtime Dashboard", layout="wide", page_icon=page_icon)
+st.set_page_config(page_title="Agent Runtime Dashboard", layout="wide", page_icon=page_icon, initial_sidebar_state="expanded")
+
+# ── Global CSS ───────────────────────────────────────────────────
+st.markdown(
+    """
+    <style>
+    :root {
+        --bg: #050705;
+        --panel: rgba(7, 12, 7, 0.72);
+        --panel-hover: rgba(12, 22, 12, 0.85);
+        --accent: #39ff14;
+        --accent-soft: rgba(57, 255, 20, 0.18);
+        --accent-border: rgba(57, 255, 20, 0.25);
+        --text: #eaffea;
+        --muted: #9ddc9d;
+        --danger: #ff4444;
+        --warn: #ffaa00;
+    }
+    .stApp {
+        background: radial-gradient(1200px 800px at 20% 10%, #0a140a 0%, #050705 55%, #030403 100%);
+        color: var(--text);
+    }
+    h1, h2, h3, h4 { color: var(--text); }
+    .stMarkdown, .stCaption, .stText, .stTextArea textarea { color: var(--text); }
+    .stButton>button {
+        background: transparent;
+        border: 1px solid var(--accent);
+        color: var(--accent);
+        box-shadow: 0 0 12px rgba(57,255,20,0.15);
+        transition: all 150ms ease;
+    }
+    .stButton>button:hover {
+        background: var(--accent-soft);
+        border-color: var(--accent);
+        box-shadow: 0 0 20px rgba(57,255,20,0.3);
+    }
+    div[data-baseweb="select"] > div {
+        border-color: var(--accent) !important;
+    }
+    /* Glass grid & cards */
+    .glass-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin:12px 0 20px;}
+    .glass-card {
+        padding:16px 18px;border-radius:14px;
+        background:var(--panel);
+        border:1px solid var(--accent-border);
+        backdrop-filter: blur(8px);
+        box-shadow: 0 6px 24px rgba(0,0,0,0.35);
+        transition: border-color 200ms ease, box-shadow 200ms ease;
+    }
+    .glass-card:hover {
+        border-color: rgba(57,255,20,0.45);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+    }
+    .glass-title {font-weight:600;font-size:0.95rem;margin-bottom:6px;color:var(--accent);}
+    .glass-meta {opacity:0.8;font-size:0.8rem;color:var(--muted);line-height:1.5;}
+    .pulse {
+        display:inline-block;width:10px;height:10px;border-radius:999px;
+        margin-right:8px;background:var(--accent);
+        box-shadow:0 0 12px rgba(57,255,20,0.6);
+        animation:pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes pulse {
+        0% {transform:scale(0.9); opacity:0.6;}
+        50% {transform:scale(1.2); opacity:1;}
+        100% {transform:scale(0.9); opacity:0.6;}
+    }
+    /* Section dividers */
+    .section-header {
+        font-size:1.1rem;font-weight:700;color:var(--accent);
+        margin:20px 0 8px;padding-bottom:6px;
+        border-bottom:1px solid var(--accent-border);
+    }
+    /* Metric cards */
+    [data-testid="stMetricValue"] { color: var(--accent) !important; font-weight: 700; }
+    [data-testid="stMetricLabel"] { color: var(--muted) !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 cols_title = st.columns([1, 8])
 with cols_title[0]:
@@ -36,7 +114,7 @@ with cols_title[0]:
 with cols_title[1]:
     st.title("Agent Runtime Dashboard")
 
-tabs = st.tabs(["Overview", "Projects", "Inbox", "Outputs", "Timeline", "Settings", "Chat", "Logs", "Health", "Digest", "Notes"])
+tabs = st.tabs(["🏠 Overview", "📁 Projects", "📥 Inbox", "📄 Outputs", "📈 Timeline", "⚙️ Settings", "💬 Chat", "📋 Logs", "❤️ Health", "📰 Digest", "📝 Notes"])
 
 def _latest_file(files: Iterable[Path]) -> Path | None:
     latest: Path | None = None
@@ -94,6 +172,21 @@ def _read_cycle_health() -> tuple[str, str]:
         last_reason = "failed to parse cycle log"
     return last_status, last_reason
 
+def _read_project_status() -> tuple[str, str]:
+    status_path = Path("/home/hackerman/agent-runtime/workspace/projects/agent-dashboard/status.json")
+    if not status_path.exists():
+        return "UNKNOWN", "status file missing"
+    try:
+        data = json.loads(status_path.read_text(encoding="utf-8"))
+        return data.get("status", "UNKNOWN"), data.get("timestamp", "")
+    except Exception:
+        return "UNKNOWN", "failed to parse status file"
+
+def _cycle_label(health: str, project_status: str) -> tuple[str, str]:
+    if health == "error" and project_status == "IN_PROGRESS":
+        return "warn", "recent failure (work resumed)"
+    return health, ""
+
 def _last_cycle_ts() -> datetime | None:
     log_path = Path("/home/hackerman/agent-runtime/logs/dashboard_cycle.jsonl")
     if not log_path.exists():
@@ -127,24 +220,20 @@ def _render_sidebar() -> None:
         st.markdown("### ⚙️ Dashboard")
 
         # Quick status summary
-        _sb_status_path = Path("/home/hackerman/agent-runtime/workspace/projects/agent-dashboard/status.json")
-        _sb_status = "UNKNOWN"
-        if _sb_status_path.exists():
-            try:
-                _sb_data = json.loads(_sb_status_path.read_text(encoding="utf-8"))
-                _sb_status = _sb_data.get("status", "UNKNOWN")
-            except Exception:
-                pass
+        _sb_status, _sb_status_ts = _read_project_status()
         _sb_health, _sb_health_reason = _read_cycle_health()
-        _sb_health_icon = "🟢" if _sb_health == "ok" else ("🔴" if _sb_health == "error" else "⚪")
+        _sb_health_label, _sb_health_note = _cycle_label(_sb_health, _sb_status)
+        _sb_health_icon = "🟢" if _sb_health_label == "ok" else ("🟡" if _sb_health_label == "warn" else ("🔴" if _sb_health_label == "error" else "⚪"))
         _sb_status_icon = {"IN_PROGRESS": "🔄", "DONE": "✅", "PENDING_HUMAN_REVIEW": "⏳"}.get(_sb_status, "❓")
 
         st.markdown(
             f"""
             <div style="border:1px solid rgba(57,255,20,0.2); border-radius:10px; padding:10px 12px; margin-bottom:12px;
                          background:rgba(7,12,7,0.5); font-size:0.85rem;">
-                <div style="margin-bottom:4px;">{_sb_health_icon} <b>Cycle:</b> {_sb_health.upper()}</div>
+                <div style="margin-bottom:4px;">{_sb_health_icon} <b>Cycle:</b> {_sb_health_label.upper()}</div>
                 <div style="margin-bottom:4px;">{_sb_status_icon} <b>Project:</b> {_sb_status}</div>
+                <div style="opacity:0.7;">Last status update: {_fmt_time(_sb_status_ts) if _sb_status_ts else '—'}</div>
+                <div style="opacity:0.7;">Recent cycle health: {_sb_health_reason}{' · ' + _sb_health_note if _sb_health_note else ''}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -313,9 +402,12 @@ def _error_id(text: str) -> str:
 
 def _copy_button(text: str, key: str) -> None:
     safe = text.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
+    badge_id = f"copy_badge_{key}"
+    btn_id = f"copy_btn_{key}"
     html = f"""
     <style>
     html, body {{ margin:0; padding:0; background:transparent; }}
+    * {{ box-sizing: border-box; }}
     .copy-btn {{
         background:transparent;
         border:1px solid #39ff14;
@@ -336,17 +428,43 @@ def _copy_button(text: str, key: str) -> None:
         background:#39ff14;
         box-shadow:0 0 20px rgba(57,255,20,0.9);
     }}
+    .copy-badge {{
+        margin-left:8px;
+        font-size:0.7rem;
+        color:#39ff14;
+        opacity:0;
+        transition: opacity 120ms ease;
+    }}
     </style>
-    <button class="copy-btn" title="Copy to clipboard"
-        onclick="navigator.clipboard.writeText(`{safe}`); this.classList.add('copied'); this.innerText='COPIED'; setTimeout(()=>{{this.classList.remove('copied'); this.innerText='⧉';}}, 900);">⧉</button>
+    <div style="display:flex; align-items:center; gap:6px;">
+      <button id="{btn_id}" class="copy-btn" title="Copy to clipboard"
+        onclick="
+          const btn=this;
+          const badge=document.getElementById('{badge_id}');
+          navigator.clipboard.writeText(`{safe}`).then(()=>{{
+            btn.classList.add('copied');
+            btn.innerText='COPIED';
+            badge.innerText='Copied';
+            badge.style.opacity=1;
+            setTimeout(()=>{{btn.classList.remove('copied'); btn.innerText='⧉'; badge.style.opacity=0;}}, 1100);
+          }}).catch(()=>{{
+            badge.innerText='Blocked';
+            badge.style.opacity=1;
+            setTimeout(()=>{{badge.style.opacity=0;}}, 1500);
+          }});
+        ">⧉</button>
+      <span id="{badge_id}" class="copy-badge">Copied</span>
+    </div>
     """
-    components.html(html, height=34, width=50)
+    components.html(html, height=34, width=120)
 
-def _failure_row(text: str) -> None:
+def _failure_row(text: str, key: str) -> None:
     safe = _html.escape(text)
+    badge_id = f"err_badge_{key}"
     html = f"""
     <style>
     html, body {{ margin:0; padding:0; background:transparent; }}
+    * {{ box-sizing: border-box; }}
     .row {{ display:flex; gap:12px; align-items:flex-start; }}
     .card {{
         flex:1;
@@ -354,7 +472,7 @@ def _failure_row(text: str) -> None:
         background:rgba(0,0,0,0.35);
         border-radius:12px;
         padding:10px 12px;
-        box-shadow:0 8px 24px rgba(0,0,0,0.35);
+        box-shadow:0 4px 16px rgba(0,0,0,0.35);
     }}
     .copy {{
         min-width:34px; height:34px; display:flex; align-items:center; justify-content:center;
@@ -367,6 +485,13 @@ def _failure_row(text: str) -> None:
         background:#39ff14;
         box-shadow:0 0 20px rgba(57,255,20,0.9);
     }}
+    .copy-badge {{
+        margin-top:6px;
+        font-size:0.7rem;
+        color:#39ff14;
+        opacity:0;
+        transition: opacity 120ms ease;
+    }}
     pre {{
         margin:0;
         background:transparent;
@@ -375,11 +500,25 @@ def _failure_row(text: str) -> None:
     }}
     </style>
     <div class="row">
-        <button class="copy" onclick="navigator.clipboard.writeText(`{safe}`); this.classList.add('copied'); this.innerText='COPIED'; setTimeout(()=>{{this.classList.remove('copied'); this.innerText='⧉';}}, 900);">⧉</button>
+        <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
+          <button class="copy" onclick="
+            const btn=this;
+            const badge=document.getElementById('{badge_id}');
+            navigator.clipboard.writeText(`{safe}`).then(()=>{{
+              btn.classList.add('copied'); btn.innerText='COPIED';
+              badge.innerText='Copied'; badge.style.opacity=1;
+              setTimeout(()=>{{btn.classList.remove('copied'); btn.innerText='⧉'; badge.style.opacity=0;}}, 1100);
+            }}).catch(()=>{{
+              badge.innerText='Blocked'; badge.style.opacity=1;
+              setTimeout(()=>{{badge.style.opacity=0;}}, 1500);
+            }});
+          ">⧉</button>
+          <span id="{badge_id}" class="copy-badge">Copied</span>
+        </div>
         <div class="card"><pre>{safe}</pre></div>
     </div>
     """
-    components.html(html, height=90, width=1200)
+    components.html(html, height=90)
 
 def _summarize_event(evt: dict) -> str:
     event = evt.get("event", "")
@@ -472,126 +611,79 @@ def _activity_feed(limit: int = 6) -> list[dict]:
 _render_sidebar()
 
 with tabs[0]:
-    st.markdown(
-        """
-        <style>
-        :root {
-            --bg: #050705;
-            --panel: rgba(7, 12, 7, 0.72);
-            --accent: #39ff14;
-            --accent-soft: rgba(57, 255, 20, 0.18);
-            --text: #eaffea;
-            --muted: #9ddc9d;
-        }
-        .stApp {
-            background: radial-gradient(1200px 800px at 20% 10%, #0a140a 0%, #050705 55%, #030403 100%);
-            color: var(--text);
-        }
-        h1, h2, h3, h4 { color: var(--text); }
-        .stMarkdown, .stCaption, .stText, .stTextArea textarea { color: var(--text); }
-        .stButton>button {
-            background: transparent;
-            border: 1px solid var(--accent);
-            color: var(--accent);
-            box-shadow: 0 0 12px rgba(57,255,20,0.15);
-        }
-        .stButton>button:hover {
-            background: var(--accent-soft);
-            border-color: var(--accent);
-        }
-        div[data-baseweb="select"] > div {
-            border-color: var(--accent) !important;
-        }
-        .glass-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:8px 0 18px;}
-        .glass-card {
-            padding:14px 16px;border-radius:14px;
-            background:var(--panel);
-            border:1px solid var(--accent-soft);
-            backdrop-filter: blur(8px);
-            box-shadow: 0 6px 24px rgba(0,0,0,0.35);
-        }
-        .glass-title {font-weight:600;font-size:0.95rem;margin-bottom:6px;color:var(--accent);}
-        .glass-meta {opacity:0.8;font-size:0.8rem;color:var(--muted);}
-        .pulse {
-            display:inline-block;
-            width:10px;height:10px;border-radius:999px;
-            margin-right:8px;background:var(--accent);
-            box-shadow:0 0 12px rgba(57,255,20,0.6);
-            animation:pulse 1.6s ease-in-out infinite;
-        }
-        @keyframes pulse {
-            0% {transform:scale(0.9); opacity:0.6;}
-            50% {transform:scale(1.2); opacity:1;}
-            100% {transform:scale(0.9); opacity:0.6;}
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.markdown('<div class="section-header">Status Snapshot</div>', unsafe_allow_html=True)
 
-    st.subheader("Status snapshot")
     patterns = ["claude_*.json", "review_claude_*__by_openai.json"]
     all_files = list_matching(patterns)
     latest_any = _latest_file(all_files)
     latest_review_file = _latest_file([p for p in all_files if p.name.startswith("review_claude_")])
     inbox_raw = read_inbox()
 
-    cols = st.columns(5)
-    cols[0].metric("Total proposals", len(all_files))
-    cols[1].metric("Latest activity", _fmt_time(stat_mtime_iso(latest_any)) if latest_any else "—")
-    cols[2].metric("Latest review", _fmt_time(stat_mtime_iso(latest_review_file)) if latest_review_file else "—")
-    cols[3].metric("Inbox lines", len([l for l in inbox_raw.splitlines() if l.strip()]))
-    health, reason = _read_cycle_health()
-    cols[4].metric("Cycle health", health.upper())
-    st.caption(f"Health: {reason} · Last patch: {_latest_patch_name()}")
-    failures = _recent_failures(2)
-    dismissed = _load_dismissed_errors()
-    if failures:
-        st.markdown("**Recent failures**")
+    snapshot_col, activity_col = st.columns([1.2, 1], gap="large")
+    with snapshot_col:
+        st.subheader("Snapshot")
+        row1 = st.columns(3)
+        row1[0].metric("Total proposals", len(all_files))
+        row1[1].metric("Latest activity", _fmt_time(stat_mtime_iso(latest_any)) if latest_any else "—")
+        row1[2].metric("Latest review", _fmt_time(stat_mtime_iso(latest_review_file)) if latest_review_file else "—")
+        row2 = st.columns(2)
+        row2[0].metric("Inbox lines", len([l for l in inbox_raw.splitlines() if l.strip()]))
+        health, reason = _read_cycle_health()
+        _ps, _ = _read_project_status()
+        health_label, _ = _cycle_label(health, _ps)
+        row2[1].metric("Cycle health", health_label.upper())
+        st.caption(f"Health: {reason} · Last patch: {_latest_patch_name()}")
+
+        failures = _recent_failures(2)
         dismissed = _load_dismissed_errors()
-        show_dismissed = st.toggle("Show dismissed", value=False, key="show_dismissed_errors")
-        for line in failures:
-            err_id = _error_id(line)
-            if (err_id in dismissed) and not show_dismissed:
-                continue
-            c_err, c_btn = st.columns([18, 2])
-            with c_err:
-                _failure_row(line[:400])
-            with c_btn:
-                label = "Dismiss" if err_id not in dismissed else "Undismiss"
-                if st.button(label, key=f"dismiss_{err_id}"):
-                    if err_id in dismissed:
-                        dismissed.remove(err_id)
-                    else:
-                        dismissed.add(err_id)
-                    _save_dismissed_errors(dismissed)
-                    st.rerun()
+        if failures:
+            st.markdown("**Recent failures**")
+            show_dismissed = st.toggle("Show dismissed", value=False, key="show_dismissed_errors")
+            for line in failures:
+                err_id = _error_id(line)
+                if (err_id in dismissed) and not show_dismissed:
+                    continue
+                c_err, c_btn = st.columns([18, 2])
+                with c_err:
+                    _failure_row(line[:400], key=err_id)
+                with c_btn:
+                    label = "Dismiss" if err_id not in dismissed else "Undismiss"
+                    if st.button(label, key=f"dismiss_{err_id}"):
+                        if err_id in dismissed:
+                            dismissed.remove(err_id)
+                        else:
+                            dismissed.add(err_id)
+                        _save_dismissed_errors(dismissed)
+                        st.rerun()
+        else:
+            st.caption("No recent failures.")
+
+    with activity_col:
+        st.subheader("Agent activity")
+        status, detail = _agent_activity()
+        status_label = "CONNECTED" if status == "active" else ("IDLE" if status == "idle" else "UNKNOWN")
+        accent = "var(--accent)" if status == "active" else "var(--muted)"
+        pulse = '<span class="pulse"></span>' if status == "active" else ""
+        st.markdown(
+            f"""
+            <div class="glass-card">
+                <div class="glass-title">Agent connection</div>
+                <div class="glass-meta">Status: {pulse}<span style="color:{accent};font-weight:600;">{status_label}</span></div>
+                <div class="glass-meta">{detail}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        feed = _activity_feed(limit=6)
+        if feed:
+            st.markdown("**Live activity**")
+            for item in feed:
+                st.markdown(f"- {_fmt_time(item['ts'])} · {item['summary']}")
+        else:
+            st.caption("No recent activity found.")
 
     st.divider()
-    status, detail = _agent_activity()
-    status_label = "CONNECTED" if status == "active" else ("IDLE" if status == "idle" else "UNKNOWN")
-    accent = "var(--accent)" if status == "active" else "var(--muted)"
-    pulse = '<span class="pulse"></span>' if status == "active" else ""
-    st.markdown(
-        f"""
-        <div class="glass-card">
-            <div class="glass-title">Agent connection</div>
-            <div class="glass-meta">Status: {pulse}<span style="color:{accent};font-weight:600;">{status_label}</span></div>
-            <div class="glass-meta">{detail}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    feed = _activity_feed(limit=6)
-    if feed:
-        st.markdown("**Live activity**")
-        for item in feed:
-            st.markdown(f"- {_fmt_time(item['ts'])} · {item['summary']}")
-    else:
-        st.caption("No recent activity found.")
-
-    st.divider()
-    st.markdown("**Action required**")
+    st.subheader("Review & cycle control")
     status_path = Path("/home/hackerman/agent-runtime/workspace/projects/agent-dashboard/status.json")
     current_status = "UNKNOWN"
     if status_path.exists():
@@ -600,34 +692,44 @@ with tabs[0]:
             current_status = data.get("status", "UNKNOWN")
         except Exception:
             current_status = "UNKNOWN"
-    if current_status == "PENDING_HUMAN_REVIEW":
-        st.warning("Review required: dashboard is waiting for your decision.")
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("Approve (DONE)"):
-                _confirm_done()
-        with c2:
-            if st.button("Continue work"):
-                _confirm_continue()
-    else:
-        st.caption("No review actions needed right now.")
+    ctrl_cols = st.columns(2, gap="large")
+    with ctrl_cols[0]:
+        st.markdown("**Review decision**")
+        if current_status == "PENDING_HUMAN_REVIEW":
+            st.warning("Review required: dashboard is waiting for your decision.")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("Approve (DONE)"):
+                    _confirm_done()
+            with c2:
+                if st.button("Continue work"):
+                    _confirm_continue()
+        else:
+            st.caption("No review actions needed right now.")
 
-    # Cycle override indicator (only when idle/stale)
-    last_cycle = _last_cycle_ts()
-    if last_cycle:
-        age_min = (datetime.now(timezone.utc) - last_cycle).total_seconds() / 60.0
-        if age_min >= 30:
-            st.warning(f"Cycle looks idle. Last run: {_fmt_time(last_cycle.isoformat())}")
+    with ctrl_cols[1]:
+        st.markdown("**Cycle control**")
+        last_cycle = _last_cycle_ts()
+        if last_cycle:
+            age_min = (datetime.now(timezone.utc) - last_cycle).total_seconds() / 60.0
+            if age_min >= 30:
+                st.warning(f"Cycle looks idle. Last run: {_fmt_time(last_cycle.isoformat())}")
+                if st.button("Kick cycle now"):
+                    _touch_trigger("manual_kick")
+                    st.success("Triggered a new cycle.")
+                    st.rerun()
+            else:
+                st.caption(f"Last cycle: {_fmt_time(last_cycle.isoformat())}")
+                if st.button("Force new cycle"):
+                    _touch_trigger("manual_kick")
+                    st.success("Triggered a new cycle.")
+                    st.rerun()
+        else:
+            st.info("No cycle history yet.")
             if st.button("Kick cycle now"):
                 _touch_trigger("manual_kick")
                 st.success("Triggered a new cycle.")
                 st.rerun()
-    else:
-        st.info("No cycle history yet.")
-        if st.button("Kick cycle now"):
-            _touch_trigger("manual_kick")
-            st.success("Triggered a new cycle.")
-            st.rerun()
 
     st.subheader("Brief me")
     st.write("Summarize inbox and latest proposals with local Ollama.")
@@ -648,7 +750,9 @@ with tabs[0]:
     if not models:
         st.warning("No Ollama models found. Pull one: ollama pull qwen2.5-coder:3b (or similar)")
     else:
-        model = st.selectbox("Model", models, index=0, key="brief_model")
+        default_model = "llama3.2:3b"
+        default_index = models.index(default_model) if default_model in models else 0
+        model = st.selectbox("Model", models, index=default_index, key="brief_model")
         if st.button("Brief me"):
             inbox_text = inbox_raw.strip()
             cpath = latest_claude()
@@ -678,7 +782,7 @@ with tabs[0]:
             with st.spinner("Generating briefing…"):
                 try:
                     from lib.ollama import generate
-                    out = generate(model, prompt, timeout=20)
+                    out = generate(model, prompt, timeout=60)
                     st.session_state["briefing_ts"] = datetime.now(PST).strftime("%b %d, %H:%M:%S")
                     st.session_state["briefing"] = out
                 except Exception as e:

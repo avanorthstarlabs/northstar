@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, sys, subprocess, textwrap, re, json, shutil
+import os, sys, subprocess, textwrap, re, json, shutil, difflib
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -15,13 +15,39 @@ LOGS.mkdir(parents=True, exist_ok=True)
 def utcnow():
     return datetime.now(timezone.utc).isoformat()
 
+def log_event(event: str, status: str, detail: str = "") -> None:
+    try:
+        line = json.dumps(
+            {
+                "ts": utcnow(),
+                "event": event,
+                "status": status,
+                "detail": detail[:4000],
+            }
+        )
+        (LOGS / "autopatch_events.jsonl").open("a", encoding="utf-8").write(line + "\n")
+    except Exception:
+        pass
+
+def safe_read_text(path: Path, fallback: str = "") -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except Exception:
+        return fallback
+
 def sh(cmd: list[str], cwd: Path | None = None) -> str:
     p = subprocess.run(cmd, cwd=str(cwd) if cwd else None, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     return p.stdout
 
+def apply_diff_file(path: Path) -> None:
+    try:
+        sh(["git", "apply", "--3way", "--whitespace=nowarn", str(path)], cwd=DASH)
+    except subprocess.CalledProcessError:
+        sh(["git", "apply", "--whitespace=nowarn", str(path)], cwd=DASH)
+
 def check_apply(diff: str) -> None:
     p = subprocess.run(
-        ["git", "apply", "--check", "--whitespace=nowarn", "-"],
+        ["git", "apply", "--3way", "--check", "--whitespace=nowarn", "-"],
         cwd=str(DASH),
         input=diff,
         text=True,
@@ -29,7 +55,16 @@ def check_apply(diff: str) -> None:
         stderr=subprocess.STDOUT,
     )
     if p.returncode != 0:
-        raise ValueError(f"git apply --check failed: {p.stdout.strip()}")
+        p2 = subprocess.run(
+            ["git", "apply", "--check", "--whitespace=nowarn", "-"],
+            cwd=str(DASH),
+            input=diff,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        if p2.returncode != 0:
+            raise ValueError(f"git apply --check failed: {p2.stdout.strip()}")
 
 def detect_linter() -> list[str] | None:
     if shutil.which("ruff"):
@@ -68,8 +103,71 @@ def extract_diff(text: str) -> str:
     stripped = text.lstrip()
     m = re.search(r"(?s)(^diff --git .*|^--- .*?\n\+\+\+ .*?\n)", stripped, re.M)
     if not m:
-        raise ValueError("No diff header found in model output.")
+        return ""
     return stripped[m.start():].strip()
+
+
+def extract_fulltext(text: str) -> str:
+    start = text.find("BEGIN_APP_PY")
+    end = text.find("END_APP_PY")
+    if start != -1 and end != -1 and end > start:
+        return text[start + len("BEGIN_APP_PY"):end].strip("\n")
+    return ""
+
+
+def extract_diff_or_fulltext(text: str) -> tuple[str, str]:
+    diff = extract_diff(text)
+    if diff:
+        return diff, ""
+    fulltext = extract_fulltext(text)
+    if fulltext:
+        return "", fulltext
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            diff = data.get("diff") or data.get("patch") or ""
+            if diff:
+                return str(diff), ""
+            fulltext = data.get("app_py") or data.get("app.py") or ""
+            if fulltext:
+                return "", str(fulltext)
+    except Exception:
+        pass
+    return "", ""
+
+
+def diff_from_fulltext(new_text: str, old_text: str) -> str:
+    if new_text == old_text:
+        return ""
+    old_lines = old_text.splitlines(keepends=True)
+    new_lines = new_text.splitlines(keepends=True)
+    diff = difflib.unified_diff(
+        old_lines,
+        new_lines,
+        fromfile="a/app.py",
+        tofile="b/app.py",
+        lineterm="",
+    )
+    return "\n".join(diff)
+
+def sanitize_diff(diff: str) -> str:
+    """Trim any trailing non-diff text that can corrupt git apply."""
+    lines = diff.splitlines()
+    allowed_prefixes = ("diff --git ", "index ", "--- ", "+++ ", "@@ ", "+", "-", " ", "\\")
+    out = []
+    for line in lines:
+        if not out:
+            if line.startswith("diff --git "):
+                out.append(line)
+            else:
+                continue
+            continue
+        if line.startswith(allowed_prefixes):
+            out.append(line)
+        else:
+            # Stop at first non-diff line after diff starts
+            break
+    return "\n".join(out).strip() + "\n"
 
 def normalize_hunks(diff: str) -> str:
     lines = diff.splitlines()
@@ -139,8 +237,7 @@ def validate_diff(diff: str) -> None:
                         raise ValueError(f"Diff refers to missing file: {b}")
     # Additional protection: forbid edits outside repo by relying on git apply in repo
     # Also cap diff size
-    if len(diff) > 250_000:
-        raise ValueError("Diff too large; refusing.")
+    # No size cap; allow large cohesive UX overhaul diffs
 
 def call_ollama(prompt: str, model: str) -> str:
     import requests
@@ -148,19 +245,19 @@ def call_ollama(prompt: str, model: str) -> str:
     r.raise_for_status()
     return r.json().get("response","")
 
-def call_openai(prompt: str, model: str) -> str:
+def call_openai(prompt: str, model: str, max_output_tokens: int = 4000) -> str:
     from openai import OpenAI
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY not set")
-    client = OpenAI(api_key=api_key)
+    client = OpenAI(api_key=api_key, timeout=300)
     system = (
         "You are an autonomous code editor. "
         "Return ONLY a unified diff. "
         "The first line MUST start with: diff --git "
         "No markdown, no commentary, no extra text. "
         "Do NOT modify CHANGELOG.md; it is updated automatically. "
-        "Keep changes small (aim for <= 120 lines changed)."
+        "Do not worry about line-count limits; prioritize a cohesive UX overhaul."
     )
     resp = client.responses.create(
         model=model,
@@ -168,7 +265,7 @@ def call_openai(prompt: str, model: str) -> str:
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ],
-        max_output_tokens=4000,
+        max_output_tokens=max_output_tokens,
     )
     text = ""
     try:
@@ -180,23 +277,23 @@ def call_openai(prompt: str, model: str) -> str:
                     text += getattr(c, "text", "")
     return text
 
-def call_claude(prompt: str, model: str) -> str:
+def call_claude(prompt: str, model: str, max_tokens: int = 4000) -> str:
     from anthropic import Anthropic
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise RuntimeError("ANTHROPIC_API_KEY not set")
-    client = Anthropic(api_key=api_key)
+    client = Anthropic(api_key=api_key, timeout=300)
     system = (
         "You are an autonomous code editor. "
         "Return ONLY a unified diff. "
         "The first line MUST start with: diff --git "
         "No markdown, no commentary, no extra text. "
         "Do NOT modify CHANGELOG.md; it is updated automatically. "
-        "Keep changes small (aim for <= 120 lines changed)."
+        "Do not worry about line-count limits; prioritize a cohesive UX overhaul."
     )
     msg = client.messages.create(
         model=model,
-        max_tokens=4000,
+        max_tokens=max_tokens,
         temperature=0.2,
         system=system,
         messages=[{"role": "user", "content": prompt}],
@@ -208,17 +305,19 @@ def call_claude(prompt: str, model: str) -> str:
     return raw
 
 def main():
-    model = os.environ.get("AUTOPATCH_MODEL", "qwen2.5-coder:7b")
+    model = os.environ.get("AUTOPATCH_MODEL", "gpt-5.2-codex")
     provider = os.environ.get("AUTOPATCH_PROVIDER", "ollama").strip().lower()
+    max_out = int(os.environ.get("AUTOPATCH_MAX_TOKENS", "6000"))
+    max_out_full = int(os.environ.get("AUTOPATCH_FULL_MAX_TOKENS", str(max_out * 2)))
     ensure_git()
     if not CHANGELOG.exists():
         CHANGELOG.write_text("# Changelog\n\n", encoding="utf-8")
 
-    work = WORK_ORDER.read_text(encoding="utf-8") if WORK_ORDER.exists() else ""
+    work = safe_read_text(WORK_ORDER)
     context = read_latest_outputs()
-    quality_gate = QUALITY_GATE.read_text(encoding="utf-8") if QUALITY_GATE.exists() else ""
+    quality_gate = safe_read_text(QUALITY_GATE)
 
-    app_text = (DASH / "app.py").read_text(encoding="utf-8")
+    app_text = safe_read_text(DASH / "app.py")
 
     # Keep prompt compact to reduce output truncation
     instructions = f"""
@@ -232,10 +331,14 @@ Hard rules:
 - Output ONLY a unified diff (git style). No commentary.
 - The first line MUST be: diff --git
 - Do NOT modify CHANGELOG.md; it is updated automatically after the patch.
-- Keep changes small (aim for <= 120 lines changed).
 - Only change files inside this repository (relative paths).
-- Keep patches small and incremental.
-- Prefer adding UX pages/tabs, summaries, timeline, and "Brief me" feature using Ollama.
+- This cycle is a deliberate UX overhaul: prioritize cohesive layout and visual structure over tiny tweaks.
+- Make a single focused improvement (one or two sections). Avoid huge refactors in one cycle.
+- Include enough context lines around changes so the patch applies cleanly.
+If you cannot produce a diff, output the full contents of app.py only between:
+BEGIN_APP_PY
+...
+END_APP_PY
 
 Current app.py (verbatim):
 {app_text}
@@ -249,20 +352,89 @@ General quality gate:
 Now produce the next patch.
 """.strip()
 
+    rewrite_instructions = f"""
+You are an autonomous engineer improving a local Streamlit dashboard project.
+
+Repository folder:
+{DASH}
+Main app file: app.py (do not use main.py).
+
+Hard rules:
+- Output ONLY a unified diff (git style). No commentary.
+- The first line MUST be: diff --git
+- Do NOT modify CHANGELOG.md; it is updated automatically after the patch.
+- Only change files inside this repository (relative paths).
+- OUTPUT A FULL FILE REPLACEMENT diff for app.py (delete and add the full file).
+If you cannot produce a diff, output the full contents of app.py only between:
+BEGIN_APP_PY
+...
+END_APP_PY
+
+Current app.py (verbatim):
+{app_text}
+
+Work order:
+{work}
+
+General quality gate:
+{quality_gate}
+
+Now output a full replacement diff for app.py only.
+""".strip()
+
+    fulltext_instructions = f"""
+You are an autonomous engineer improving a local Streamlit dashboard project.
+
+Repository folder:
+{DASH}
+Main app file: app.py (do not use main.py).
+
+Hard rules:
+- Output ONLY the full contents of app.py.
+- Wrap it between the exact markers:
+BEGIN_APP_PY
+...full file contents...
+END_APP_PY
+- Do NOT include a diff, markdown, or commentary.
+
+Current app.py (verbatim):
+{app_text}
+
+Work order:
+{work}
+
+General quality gate:
+{quality_gate}
+""".strip()
+
     raw = ""
     diff = ""
     last_err = ""
-    for attempt in range(2):
+    for attempt in range(3):
         extra = "\nREMINDER: Output ONLY unified diff. No markdown. No commentary.\n" if attempt > 0 else ""
+        if attempt >= 2:
+            extra += "\nIf you cannot output a diff, output FULL app.py between BEGIN_APP_PY and END_APP_PY.\n"
         prompt = instructions + extra
-        if provider in ("codex", "openai"):
-            raw = call_openai(prompt, model=model)
-        elif provider == "claude":
-            raw = call_claude(prompt, model=os.environ.get("CLAUDE_MODEL", "claude-opus-4-6"))
-        else:
-            raw = call_ollama(prompt, model=model)
         try:
-            diff = normalize_hunks(extract_diff(raw))
+            if provider in ("codex", "openai"):
+                raw = call_openai(prompt, model=model, max_output_tokens=max_out)
+            elif provider == "claude":
+                raw = call_claude(prompt, model=os.environ.get("CLAUDE_MODEL", "claude-opus-4-6"), max_tokens=max_out)
+            else:
+                raw = call_ollama(prompt, model=model)
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e}"
+            log_event("model_call", "error", last_err)
+            continue
+        try:
+            diff, fulltext = extract_diff_or_fulltext(raw)
+            if fulltext:
+                old_text = (DASH / "app.py").read_text(encoding="utf-8")
+                diff = diff_from_fulltext(fulltext, old_text)
+            diff = normalize_hunks(sanitize_diff(diff))
+            if not diff and fulltext:
+                log_event("diff", "noop", "Fulltext produced no diff; skipping apply.")
+                return
             validate_diff(diff)
             check_apply(diff)
             break
@@ -270,10 +442,40 @@ Now produce the next patch.
             last_err = f"{type(e).__name__}: {e}"
             diff = ""
             continue
+
+    # Fallback: request full-file replacement if normal diff fails
+    if not diff:
+        try:
+            fulltext = ""
+            for ft_attempt in range(2):
+                max_tokens = max_out_full if ft_attempt == 0 else int(max_out_full * 1.4)
+                if provider in ("codex", "openai"):
+                    raw = call_openai(fulltext_instructions, model=model, max_output_tokens=max_tokens)
+                elif provider == "claude":
+                    raw = call_claude(fulltext_instructions, model=os.environ.get("CLAUDE_MODEL", "claude-opus-4-6"), max_tokens=max_tokens)
+                else:
+                    raw = call_ollama(fulltext_instructions, model=model)
+                fulltext = extract_fulltext(raw)
+                if fulltext:
+                    break
+            if not fulltext:
+                raise ValueError("No BEGIN_APP_PY/END_APP_PY block found in model output.")
+            old_text = (DASH / "app.py").read_text(encoding="utf-8")
+            diff = diff_from_fulltext(fulltext, old_text)
+            diff = normalize_hunks(sanitize_diff(diff))
+            if not diff:
+                log_event("diff", "noop", "Fulltext produced no diff; skipping apply.")
+                return
+            validate_diff(diff)
+            check_apply(diff)
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e}"
+            diff = ""
     if not diff:
         ts = utcnow().replace(":", "-")
         raw_path = LOGS / f"dashboard_patch_raw_{ts}.txt"
         raw_path.write_text(raw, encoding="utf-8")
+        log_event("diff", "error", f"Invalid diff after retries: {last_err}")
         raise ValueError(f"Model output did not contain a valid unified diff after retry ({last_err}). Raw saved to {raw_path.name}")
 
     # Save diff artifact
@@ -281,8 +483,8 @@ Now produce the next patch.
     diff_path = LOGS / f"dashboard_patch_{ts}.diff"
     diff_path.write_text(diff, encoding="utf-8")
 
-    # Apply diff
-    sh(["git", "apply", "--whitespace=nowarn", str(diff_path)], cwd=DASH)
+    # Apply diff (3-way to reduce patch drift failures)
+    apply_diff_file(diff_path)
 
     # Smoke: compile + import checks
     sh([sys.executable, "-m", "py_compile", "app.py"], cwd=DASH)

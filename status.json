@@ -1,5 +1,5 @@
 {
-  "status": "IN_PROGRESS",
-  "timestamp": "2026-02-08T03:04:18.010444+00:00",
-  "reason": "retry_after_error"
+  "status": "ERROR",
+  "timestamp": "2026-02-08T05:22:51.937011+00:00",
+  "reason": "autopatch_failed"
 }
