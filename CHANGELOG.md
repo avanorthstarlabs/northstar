@@ -138,9 +138,16 @@
 
 ## 2026-02-08T06:07:40Z
 - Autopatch: fall back to non-3way git apply when index mismatch blocks patching.
+
+## 2026-02-08T06:16:30Z
+- Dashboard: added credits/usage snapshot with provider/model display in Overview and Settings.
+- Dashboard: fixed credit snapshot helper indentation.
+- Dashboard: credit status now ignores older billing errors if a newer successful cycle exists.
 ## 2026-02-08T05:24:44.562580+00:00
 - Applied patch: dashboard_patch_2026-02-08T05-24-38.914061+00-00.diff
 
 ## 2026-02-08T05:29:23.781456+00:00
 - Applied patch: dashboard_patch_2026-02-08T05-29-17.177513+00-00.diff
+## 2026-02-08T06:23:23.383498+00:00
+- Applied patch: dashboard_patch_2026-02-08T06-23-16.883048+00-00.diff
 

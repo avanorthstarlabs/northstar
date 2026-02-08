@@ -102,6 +102,134 @@ st.markdown(
     /* Metric cards */
     [data-testid="stMetricValue"] { color: var(--accent) !important; font-weight: 700; }
     [data-testid="stMetricLabel"] { color: var(--muted) !important; }
+
+    /* ── Tab bar overhaul ─────────────────────────────────────── */
+    /* Container strip */
+    div[data-baseweb="tab-list"] {
+        background: rgba(7, 12, 7, 0.6);
+        border: 1px solid var(--accent-border);
+        border-radius: 12px;
+        padding: 4px 6px;
+        gap: 2px;
+        backdrop-filter: blur(6px);
+        overflow-x: auto;
+    }
+    /* Individual tab buttons */
+    div[data-baseweb="tab-list"] button[data-baseweb="tab"] {
+        background: transparent !important;
+        border: 1px solid transparent !important;
+        border-radius: 8px !important;
+        color: var(--muted) !important;
+        font-weight: 500 !important;
+        font-size: 0.82rem !important;
+        padding: 6px 14px !important;
+        transition: all 150ms ease !important;
+        white-space: nowrap;
+    }
+    div[data-baseweb="tab-list"] button[data-baseweb="tab"]:hover {
+        background: var(--accent-soft) !important;
+        color: var(--accent) !important;
+        border-color: var(--accent-border) !important;
+    }
+    div[data-baseweb="tab-list"] button[aria-selected="true"] {
+        background: var(--accent-soft) !important;
+        border: 1px solid var(--accent) !important;
+        color: var(--accent) !important;
+        font-weight: 700 !important;
+        box-shadow: 0 0 14px rgba(57,255,20,0.18) !important;
+    }
+    /* Kill the default Streamlit blue underline */
+    div[data-baseweb="tab-highlight"] {
+        display: none !important;
+    }
+    div[data-baseweb="tab-border"] {
+        display: none !important;
+    }
+
+    /* ── Section headers ──────────────────────────────────────── */
+    .section-header {
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: var(--accent);
+        margin: 24px 0 10px;
+        padding: 0 0 8px;
+        border-bottom: 1px solid var(--accent-border);
+        letter-spacing: 0.02em;
+    }
+
+    /* ── Glass cards v2 ───────────────────────────────────────── */
+    .glass-card {
+        padding: 18px 20px;
+        border-radius: 14px;
+        background: var(--panel);
+        border: 1px solid var(--accent-border);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 6px 28px rgba(0,0,0,0.4);
+        transition: border-color 200ms ease, box-shadow 200ms ease, transform 180ms ease;
+    }
+    .glass-card:hover {
+        border-color: rgba(57,255,20,0.5);
+        box-shadow: 0 8px 36px rgba(0,0,0,0.5);
+        transform: translateY(-1px);
+    }
+
+    /* ── Metric cards ─────────────────────────────────────────── */
+    [data-testid="stMetricValue"] {
+        color: var(--accent) !important;
+        font-weight: 700;
+        font-size: 1.6rem !important;
+    }
+    [data-testid="stMetricLabel"] {
+        color: var(--muted) !important;
+        font-size: 0.78rem !important;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+    }
+    [data-testid="stMetricDelta"] {
+        font-size: 0.75rem !important;
+    }
+    div[data-testid="metric-container"] {
+        background: var(--panel);
+        border: 1px solid var(--accent-border);
+        border-radius: 12px;
+        padding: 14px 16px 10px;
+        backdrop-filter: blur(6px);
+    }
+
+    /* ── Expander styling ─────────────────────────────────────── */
+    details[data-testid="stExpander"] {
+        border: 1px solid var(--accent-border) !important;
+        border-radius: 10px !important;
+        background: var(--panel) !important;
+    }
+    details[data-testid="stExpander"] summary {
+        color: var(--text) !important;
+        font-weight: 500;
+    }
+
+    /* ── Dividers ─────────────────────────────────────────────── */
+    hr {
+        border: none !important;
+        border-top: 1px solid var(--accent-border) !important;
+        margin: 20px 0 !important;
+    }
+
+    /* ── Sidebar polish ───────────────────────────────────────── */
+    section[data-testid="stSidebar"] {
+        background: rgba(5, 8, 5, 0.92) !important;
+        border-right: 1px solid var(--accent-border);
+    }
+    section[data-testid="stSidebar"] .stButton>button {
+        font-size: 0.82rem;
+    }
+
+    /* ── Text area / inputs ───────────────────────────────────── */
+    .stTextArea textarea, .stTextInput input {
+        background: rgba(7, 12, 7, 0.6) !important;
+        border-color: var(--accent-border) !important;
+        color: var(--text) !important;
+        border-radius: 8px !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -112,9 +240,29 @@ with cols_title[0]:
     if LOGO_PATH.exists():
         st.image(str(LOGO_PATH), width=72)
 with cols_title[1]:
-    st.title("Agent Runtime Dashboard")
+    st.markdown(
+        """
+        <div style="display:flex; align-items:center; gap:14px; margin-bottom:4px;">
+            <h1 style="margin:0; padding:0; font-size:1.8rem; letter-spacing:-0.02em;">
+                Agent Runtime Dashboard
+            </h1>
+            <span class="pulse" style="margin-top:4px;"></span>
+        </div>
+        <div style="font-size:0.78rem; color:var(--muted); margin-top:-2px; letter-spacing:0.04em;">
+            AUTONOMOUS ENGINEERING CONTROL CENTER
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-tabs = st.tabs(["🏠 Overview", "📁 Projects", "📥 Inbox", "📄 Outputs", "📈 Timeline", "⚙️ Settings", "💬 Chat", "📋 Logs", "❤️ Health", "📰 Digest", "📝 Notes"])
+# Small spacer before tabs
+st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
+
+tabs = st.tabs([
+    "🏠 Overview", "📁 Projects", "📥 Inbox", "📄 Outputs",
+    "📈 Timeline", "⚙️ Settings", "💬 Chat", "📋 Logs",
+    "❤️ Health", "📰 Digest", "📝 Notes",
+])
 
 def _latest_file(files: Iterable[Path]) -> Path | None:
     latest: Path | None = None
@@ -171,6 +319,96 @@ def _read_cycle_health() -> tuple[str, str]:
         last_status = "unknown"
         last_reason = "failed to parse cycle log"
     return last_status, last_reason
+
+def _last_autopatch_success_ts() -> datetime | None:
+    log_path = Path("/home/hackerman/agent-runtime/logs/dashboard_cycle.jsonl")
+    if not log_path.exists():
+        return None
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        for line in reversed(lines[-400:]):
+            if "\"event\": \"autopatch\"" in line and "\"returncode\": 0" in line:
+                try:
+                    obj = json.loads(line)
+                    ts = obj.get("ts")
+                    if ts:
+                        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                except Exception:
+                    continue
+    except Exception:
+        return None
+    return None
+
+def _latest_routing() -> dict:
+    log_path = Path("/home/hackerman/agent-runtime/logs/dashboard_cycle.jsonl")
+    if not log_path.exists():
+        return {}
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        for line in reversed(lines[-400:]):
+            if "\"event\": \"routing\"" in line:
+                try:
+                    return json.loads(line)
+                except Exception:
+                    continue
+    except Exception:
+        return {}
+    return {}
+
+def _routing_config() -> dict:
+    cfg_path = Path("/home/hackerman/agent-runtime/constitution/agent_routing.json")
+    if not cfg_path.exists():
+        return {}
+    try:
+        return json.loads(cfg_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+def _active_provider_model() -> tuple[str, str]:
+    cfg = _routing_config()
+    routing = _latest_routing()
+    provider = (routing.get("provider") or cfg.get("force_provider") or cfg.get("default_provider") or "unknown").strip().lower()
+    model = "—"
+    if provider == "codex":
+        model = str(cfg.get("codex_model", "gpt-5.2-codex"))
+    elif provider == "claude":
+        model = str(cfg.get("claude_model", "claude-opus-4-6"))
+    elif provider == "ollama":
+        model = str(cfg.get("ollama_model", "llama3.2:3b"))
+    return provider, model
+
+def _credit_snapshot() -> tuple[str, str]:
+    log_path = Path("/home/hackerman/agent-runtime/logs/autopatch_events.jsonl")
+    if not log_path.exists():
+        return "unknown", "No credit signal found."
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        last_credit_ts = None
+        for line in reversed(lines[-400:]):
+            if "\"event\": \"model_call\"" in line and "\"status\": \"error\"" in line:
+                try:
+                    obj = json.loads(line)
+                    detail = (obj.get("detail") or "").lower()
+                    ts = obj.get("ts")
+                except Exception:
+                    detail = line.lower()
+                    ts = None
+                if "credit" in detail or "billing" in detail or "quota" in detail:
+                    if ts:
+                        try:
+                            last_credit_ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                        except Exception:
+                            last_credit_ts = None
+                    if last_credit_ts:
+                        break
+        last_ok = _last_autopatch_success_ts()
+        if last_credit_ts and last_ok and last_ok > last_credit_ts:
+            return "ok", "No recent billing issues."
+        if last_credit_ts:
+            return "low", "Billing/credit issue detected recently."
+        return "unknown", "No billing issues detected."
+    except Exception:
+        return "unknown", "Unable to parse credit log."
 
 def _read_project_status() -> tuple[str, str]:
     status_path = Path("/home/hackerman/agent-runtime/workspace/projects/agent-dashboard/status.json")
@@ -619,20 +857,37 @@ with tabs[0]:
     latest_review_file = _latest_file([p for p in all_files if p.name.startswith("review_claude_")])
     inbox_raw = read_inbox()
 
-    snapshot_col, activity_col = st.columns([1.2, 1], gap="large")
+    snapshot_col, activity_col = st.columns([1.3, 1], gap="large")
     with snapshot_col:
-        st.subheader("Snapshot")
-        row1 = st.columns(3)
-        row1[0].metric("Total proposals", len(all_files))
-        row1[1].metric("Latest activity", _fmt_time(stat_mtime_iso(latest_any)) if latest_any else "—")
-        row1[2].metric("Latest review", _fmt_time(stat_mtime_iso(latest_review_file)) if latest_review_file else "—")
-        row2 = st.columns(2)
-        row2[0].metric("Inbox lines", len([l for l in inbox_raw.splitlines() if l.strip()]))
+        st.markdown('<div class="section-header" style="margin-top:0;">📊 Snapshot</div>', unsafe_allow_html=True)
+
+        # Top row: key numbers
+        row1 = st.columns(4)
+        row1[0].metric("Proposals", len(all_files))
+        row1[1].metric("Inbox items", len([l for l in inbox_raw.splitlines() if l.strip()]))
+        row1[2].metric("Latest activity", _fmt_time(stat_mtime_iso(latest_any)) if latest_any else "—")
+        row1[3].metric("Latest review", _fmt_time(stat_mtime_iso(latest_review_file)) if latest_review_file else "—")
+
+        # Second row: system health
         health, reason = _read_cycle_health()
         _ps, _ = _read_project_status()
         health_label, _ = _cycle_label(health, _ps)
-        row2[1].metric("Cycle health", health_label.upper())
-        st.caption(f"Health: {reason} · Last patch: {_latest_patch_name()}")
+        provider, model = _active_provider_model()
+        credit_status, credit_note = _credit_snapshot()
+
+        row2 = st.columns(3)
+        row2[0].metric("Cycle health", health_label.upper())
+        row2[1].metric("Provider", provider.upper() if provider else "UNKNOWN")
+        row2[2].metric("Credits", credit_status.upper())
+
+        # Contextual caption
+        st.markdown(
+            f'<div style="font-size:0.78rem; color:var(--muted); margin:-6px 0 8px; line-height:1.6;">'
+            f'🔧 {reason} · Patch: <code>{_latest_patch_name()}</code><br>'
+            f'🤖 Model: <code>{model}</code> · {credit_note}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
         failures = _recent_failures(2)
         dismissed = _load_dismissed_errors()
@@ -659,7 +914,7 @@ with tabs[0]:
             st.caption("No recent failures.")
 
     with activity_col:
-        st.subheader("Agent activity")
+        st.markdown('<div class="section-header" style="margin-top:0;">🤖 Agent Activity</div>', unsafe_allow_html=True)
         status, detail = _agent_activity()
         status_label = "CONNECTED" if status == "active" else ("IDLE" if status == "idle" else "UNKNOWN")
         accent = "var(--accent)" if status == "active" else "var(--muted)"
@@ -667,23 +922,31 @@ with tabs[0]:
         st.markdown(
             f"""
             <div class="glass-card">
-                <div class="glass-title">Agent connection</div>
-                <div class="glass-meta">Status: {pulse}<span style="color:{accent};font-weight:600;">{status_label}</span></div>
-                <div class="glass-meta">{detail}</div>
+                <div class="glass-title" style="font-size:1rem;">Agent Connection</div>
+                <div class="glass-meta" style="margin:8px 0 4px;">Status: {pulse}<span style="color:{accent};font-weight:700;font-size:0.95rem;">{status_label}</span></div>
+                <div class="glass-meta" style="line-height:1.6;">{detail}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
         feed = _activity_feed(limit=6)
         if feed:
-            st.markdown("**Live activity**")
+            st.markdown(
+                '<div style="font-size:0.85rem; font-weight:600; color:var(--accent); margin:14px 0 6px;">Live Activity</div>',
+                unsafe_allow_html=True,
+            )
             for item in feed:
-                st.markdown(f"- {_fmt_time(item['ts'])} · {item['summary']}")
+                st.markdown(
+                    f'<div style="font-size:0.8rem; color:var(--text); padding:3px 0; border-left:2px solid var(--accent-border); padding-left:10px; margin:2px 0;">'
+                    f'<span style="color:var(--muted);">{_fmt_time(item["ts"])}</span> · {item["summary"]}'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
         else:
             st.caption("No recent activity found.")
 
     st.divider()
-    st.subheader("Review & cycle control")
+    st.markdown('<div class="section-header">🎛️ Review & Cycle Control</div>', unsafe_allow_html=True)
     status_path = Path("/home/hackerman/agent-runtime/workspace/projects/agent-dashboard/status.json")
     current_status = "UNKNOWN"
     if status_path.exists():
@@ -731,8 +994,8 @@ with tabs[0]:
                 st.success("Triggered a new cycle.")
                 st.rerun()
 
-    st.subheader("Brief me")
-    st.write("Summarize inbox and latest proposals with local Ollama.")
+    st.markdown('<div class="section-header">🧠 Brief Me</div>', unsafe_allow_html=True)
+    st.caption("Summarize inbox and latest proposals with local Ollama.")
 
     try:
         models = list_models(timeout=4)
@@ -794,7 +1057,7 @@ with tabs[0]:
 
             if "briefing_ts" in st.session_state:
                 st.caption(f"Generated at {st.session_state['briefing_ts']}")
-    st.subheader("Project overview")
+    st.markdown('<div class="section-header">📂 Project Overview</div>', unsafe_allow_html=True)
     projects_root = Path("/home/hackerman/agent-runtime/workspace/projects")
     projects = [p for p in projects_root.iterdir() if p.is_dir()]
 
@@ -871,7 +1134,7 @@ with tabs[0]:
                 st.markdown(f"- **{p.name}** · {status} · {_fmt_time(ts) if ts else 'recently updated'}")
 
         st.divider()
-        st.markdown("**Activity feed (latest project updates)**")
+        st.markdown('<div class="section-header" style="font-size:0.95rem;">📡 Activity Feed</div>', unsafe_allow_html=True)
         updates = _recent_updates_global()
         if not updates:
             st.caption("No recent updates yet.")
@@ -1183,6 +1446,10 @@ with tabs[5]:
 
     st.divider()
     st.subheader("Diagnostics")
+    provider, model = _active_provider_model()
+    credit_status, credit_note = _credit_snapshot()
+    st.markdown(f"**Credits & usage**: {credit_status.upper()} · Provider: {provider.upper() if provider else 'UNKNOWN'} · Model: {model}")
+    st.caption(credit_note)
     if st.button("Test Brief me (fast)"):
         try:
             models = list_models(timeout=4)
