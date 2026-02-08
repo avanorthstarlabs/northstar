@@ -951,6 +951,7 @@ with tabs[2]:
 
 with tabs[4]:
     st.subheader("Latest outputs")
+    st.caption("Browse proposals and reviews with a master-detail view.")
     patterns = ["claude_*.json", "review_claude_*__by_openai.json"]
     all_files = list_matching(patterns)
 
@@ -985,6 +986,7 @@ with tabs[4]:
         return f"{kind} · {stamp}"
 
     query = st.text_input("Search", help="Filter by filename...")
+    sort_order = st.selectbox("Sort by", ["Newest first", "Oldest first", "Filename A→Z"])
     max_items = st.slider("Max items", min_value=5, max_value=100, value=20, step=5)
 
     filtered = [p for p in all_files if query.lower() in p.name.lower()] if query else all_files
@@ -992,57 +994,106 @@ with tabs[4]:
     if not filtered:
         st.info("No matching proposal files found.")
     else:
-        if "selected_output" not in st.session_state:
-            st.session_state["selected_output"] = str(filtered[0])
+        claude_files = [p for p in all_files if p.name.startswith("claude_")]
+        review_files = [p for p in all_files if p.name.startswith("review_claude_")]
+        latest_any = _latest_file(all_files)
+        latest_review = _latest_file(review_files)
 
-        grouped: dict[str, list[Path]] = {}
-        for p in filtered:
-            meta = _summarize_output(p)
-            key = _project_key(meta, p.name)
-            grouped.setdefault(key, []).append(p)
+        if sort_order == "Oldest first":
+            filtered_sorted = sorted(filtered, key=extract_timestamp)
+        elif sort_order == "Filename A→Z":
+            filtered_sorted = sorted(filtered, key=lambda p: p.name.lower())
+        else:
+            filtered_sorted = sorted(filtered, key=extract_timestamp, reverse=True)
 
-        st.markdown("**Projects**")
-        proj_cols = st.columns(min(4, max(1, len(grouped))))
-        for idx, (project, items) in enumerate(sorted(grouped.items())):
-            with proj_cols[idx % len(proj_cols)]:
-                st.caption(project)
-                latest = max(items, key=lambda x: extract_timestamp(x))
-                meta = _summarize_output(latest)
-                if st.button(f"Open latest", key=f"open_latest_{project}"):
-                    st.session_state["selected_output"] = str(latest)
+        left_col, right_col = st.columns([1.05, 1.5], gap="large")
 
-        st.divider()
-        st.markdown("**All proposals (clean labels)**")
-        for p in filtered[:max_items]:
-            with st.container():
-                cols = st.columns([6, 2, 1])
-                with cols[0]:
-                    meta = _summarize_output(p)
-                    st.markdown(f"**{_clean_label(p, meta)}**")
-                    st.caption(f"{_fmt_time(stat_mtime_iso(p))} · {p.stat().st_size} bytes")
-                    if meta["summary"]:
-                        st.markdown(f"- {meta['summary']}")
-                with cols[1]:
-                    kind = "Claude proposal" if p.name.startswith("claude_") else "OpenAI review"
-                    st.write(kind)
-                    if meta["mode"]:
-                        st.caption(f"Mode: {meta['mode']}")
-                    if meta["proposal_id"]:
-                        st.caption(f"ID: {meta['proposal_id']}")
-                with cols[2]:
-                    if st.button("Open", key=f"view_{p.name}"):
-                        st.session_state["selected_output"] = str(p)
-                st.divider()
+        with left_col:
+            st.markdown("**Library overview**")
+            stats_cols = st.columns(3)
+            stats_cols[0].metric("Total", len(all_files))
+            stats_cols[1].metric("Claude", len(claude_files))
+            stats_cols[2].metric("Reviews", len(review_files))
+            st.caption(f"Latest activity: {_fmt_time(stat_mtime_iso(latest_any)) if latest_any else '—'} · Latest review: {_fmt_time(stat_mtime_iso(latest_review)) if latest_review else '—'}")
 
-        sel = st.session_state.get("selected_output")
-        if sel:
-            p = Path(sel)
-            st.subheader(f"Viewer: {p.name}")
-            try:
-                st.json(read_json_file(p))
-            except Exception as e:
-                st.error(f"Failed to read JSON: {e}")
-                st.code(p.read_text(encoding="utf-8")[:12000])
+            grouped: dict[str, list[Path]] = {}
+            for p in filtered:
+                meta = _summarize_output(p)
+                key = _project_key(meta, p.name)
+                grouped.setdefault(key, []).append(p)
+
+            if grouped:
+                st.markdown("**Project shortcuts**")
+                proj_cols = st.columns(min(3, max(1, len(grouped))))
+                for idx, (project, items) in enumerate(sorted(grouped.items())):
+                    with proj_cols[idx % len(proj_cols)]:
+                        st.caption(project)
+                        latest = max(items, key=lambda x: extract_timestamp(x))
+                        if st.button("Open latest", key=f"open_latest_{project}"):
+                            st.session_state["selected_output"] = str(latest)
+                            st.rerun()
+
+            st.divider()
+            st.markdown("**Output library**")
+
+            label_map: dict[str, str] = {}
+            meta_map: dict[str, dict[str, str]] = {}
+            options = []
+            for p in filtered_sorted[:max_items]:
+                meta = _summarize_output(p)
+                key = str(p)
+                meta_map[key] = meta
+                label_map[key] = _clean_label(p, meta)
+                options.append(key)
+
+            if "selected_output" not in st.session_state and options:
+                st.session_state["selected_output"] = options[0]
+
+            if options:
+                selected = st.radio(
+                    "Select an output",
+                    options=options,
+                    index=options.index(st.session_state.get("selected_output", options[0])),
+                    format_func=lambda key: label_map.get(key, key),
+                    label_visibility="collapsed",
+                )
+                st.session_state["selected_output"] = selected
+                st.caption(f"Showing {min(len(options), max_items)} of {len(filtered)} matching files.")
+            else:
+                st.caption("No outputs available in this filter.")
+
+        with right_col:
+            sel = st.session_state.get("selected_output")
+            if not sel:
+                st.info("Select an output to view its details.")
+            else:
+                p = Path(sel)
+                meta = _summarize_output(p)
+                kind = "Claude proposal" if p.name.startswith("claude_") else "OpenAI review"
+                st.markdown(
+                    f"""
+                    <div class="glass-card">
+                        <div class="glass-title">{p.name}</div>
+                        <div class="glass-meta">{kind} · {_fmt_time(stat_mtime_iso(p))} · {p.stat().st_size:,} bytes</div>
+                        <div class="glass-meta">Mode: {meta.get('mode') or '—'} · ID: {meta.get('proposal_id') or '—'}</div>
+                        <div class="glass-meta">{meta.get('summary') or 'No summary provided.'}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                st.markdown("**Output JSON**")
+                try:
+                    payload = read_json_file(p)
+                    st.json(payload)
+                    st.download_button(
+                        "Download JSON",
+                        data=json.dumps(payload, indent=2),
+                        file_name=p.name,
+                        mime="application/json",
+                    )
+                except Exception as e:
+                    st.error(f"Failed to read JSON: {e}")
+                    st.code(p.read_text(encoding="utf-8")[:12000])
 
 with tabs[3]:
     st.subheader("Timeline")
