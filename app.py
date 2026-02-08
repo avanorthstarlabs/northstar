@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import base64
 import json
+import hashlib
 import streamlit as st
 from lib.runtime import (
     read_mode, write_mode,
@@ -35,7 +36,14 @@ with cols_title[0]:
 with cols_title[1]:
     st.title("Agent Runtime Dashboard")
 
-tabs = st.tabs(["Overview", "Projects", "Inbox", "Outputs", "Timeline", "Settings", "Chat", "Logs", "Health"])
+# Auto-refresh toggle in sidebar
+with st.sidebar:
+    st.markdown("### ⚙️ Dashboard")
+    auto_refresh = st.toggle("Auto-refresh (30s)", value=False, key="auto_refresh")
+    if auto_refresh:
+        st.caption("Page will refresh every 30 seconds.")
+
+tabs = st.tabs(["Overview", "Projects", "Inbox", "Outputs", "Timeline", "Settings", "Chat", "Logs", "Health", "Digest"])
 
 def _latest_file(files: Iterable[Path]) -> Path | None:
     latest: Path | None = None
@@ -200,6 +208,31 @@ def _recent_failures(limit: int = 3) -> list[str]:
         return []
     return failures
 
+def _dismissed_errors_path() -> Path:
+    return Path("/home/hackerman/agent-runtime/logs/dismissed_errors.json")
+
+def _load_dismissed_errors() -> set[str]:
+    path = _dismissed_errors_path()
+    if not path.exists():
+        return set()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return set(str(x) for x in data)
+    except Exception:
+        return set()
+    return set()
+
+def _save_dismissed_errors(ids: set[str]) -> None:
+    path = _dismissed_errors_path()
+    try:
+        path.write_text(json.dumps(sorted(ids), indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+def _error_id(text: str) -> str:
+    return hashlib.sha1(text.encode("utf-8", errors="ignore")).hexdigest()[:12]
+
 def _copy_button(text: str, key: str) -> None:
     safe = text.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
     html = f"""
@@ -214,14 +247,20 @@ def _copy_button(text: str, key: str) -> None:
         cursor:pointer;
         box-shadow:0 0 12px rgba(57,255,20,0.6);
         transition: all 120ms ease;
+        font-weight:600;
     }}
     .copy-btn:active {{
         transform: scale(0.96);
         box-shadow:0 0 20px rgba(57,255,20,0.9);
     }}
+    .copy-btn.copied {{
+        color:#0b0f0b;
+        background:#39ff14;
+        box-shadow:0 0 20px rgba(57,255,20,0.9);
+    }}
     </style>
     <button class="copy-btn" title="Copy to clipboard"
-        onclick="navigator.clipboard.writeText(`{safe}`); this.innerText='✓'; setTimeout(()=>this.innerText='⧉', 800);">⧉</button>
+        onclick="navigator.clipboard.writeText(`{safe}`); this.classList.add('copied'); this.innerText='COPIED'; setTimeout(()=>{{this.classList.remove('copied'); this.innerText='⧉';}}, 900);">⧉</button>
     """
     components.html(html, height=34, width=50)
 
@@ -243,6 +282,12 @@ def _failure_row(text: str) -> None:
         min-width:34px; height:34px; display:flex; align-items:center; justify-content:center;
         border:1px solid #39ff14; color:#39ff14; border-radius:8px; cursor:pointer;
         box-shadow:0 0 12px rgba(57,255,20,0.6); background:transparent;
+        font-weight:600;
+    }}
+    .copy.copied {{
+        color:#0b0f0b;
+        background:#39ff14;
+        box-shadow:0 0 20px rgba(57,255,20,0.9);
     }}
     pre {{
         margin:0;
@@ -252,7 +297,7 @@ def _failure_row(text: str) -> None:
     }}
     </style>
     <div class="row">
-        <button class="copy" onclick="navigator.clipboard.writeText(`{safe}`)">⧉</button>
+        <button class="copy" onclick="navigator.clipboard.writeText(`{safe}`); this.classList.add('copied'); this.innerText='COPIED'; setTimeout(()=>{{this.classList.remove('copied'); this.innerText='⧉';}}, 900);">⧉</button>
         <div class="card"><pre>{safe}</pre></div>
     </div>
     """
@@ -261,27 +306,32 @@ def _failure_row(text: str) -> None:
 def _summarize_event(evt: dict) -> str:
     event = evt.get("event", "")
     if event == "proposal_ok":
-        return f"Claude drafted a proposal ({evt.get('proposal_id','unknown')})."
+        pid = evt.get("proposal_id", "unknown")
+        planner = evt.get("planner", "claude").capitalize()
+        return f"{planner} drafted a proposal ({pid})."
     if event == "review_written":
-        return "Codex reviewed the proposal."
+        critic = evt.get("critic", "codex").capitalize()
+        return f"{critic} reviewed the proposal."
     if event == "proposal_skipped":
         return "No new projects; proposal step skipped."
     if event == "executor_run":
         code = evt.get("returncode")
-        return "Applied a patch and ran checks." if code == 0 else "Cycle failed during patch/checks."
+        if code == 0:
+            return f"Executor applied a patch and ran checks ({_latest_patch_name()})."
+        return "Executor failed during patch/checks."
     if event == "autopatch":
         code = evt.get("returncode")
-        return "Autopatch succeeded." if code == 0 else "Autopatch failed."
+        return "Autopatch succeeded (diff generated)." if code == 0 else "Autopatch failed to produce a valid diff."
     if event == "check":
         name = evt.get("name", "check")
         return f"Validation check: {name} {'passed' if evt.get('passed') else 'failed'}."
     if event == "done":
-        return "Marked ready for review."
+        return "Marked ready for review (all gates satisfied)."
     if event == "in_progress":
-        return "Cycle completed; continuing work."
+        return "Cycle completed; continuing work (more improvements needed)."
     if event == "routing":
         provider = evt.get("provider", "unknown")
-        return f"Routed this cycle to {provider.upper()}."
+        return f"Routed this cycle to {provider.upper()} for the next patch."
     return "Activity updated."
 
 
@@ -415,10 +465,27 @@ with tabs[0]:
     cols[4].metric("Cycle health", health.upper())
     st.caption(f"Health: {reason} · Last patch: {_latest_patch_name()}")
     failures = _recent_failures(2)
+    dismissed = _load_dismissed_errors()
     if failures:
         st.markdown("**Recent failures**")
+        dismissed = _load_dismissed_errors()
+        show_dismissed = st.toggle("Show dismissed", value=False, key="show_dismissed_errors")
         for line in failures:
-            _failure_row(line[:400])
+            err_id = _error_id(line)
+            if (err_id in dismissed) and not show_dismissed:
+                continue
+            c_err, c_btn = st.columns([18, 2])
+            with c_err:
+                _failure_row(line[:400])
+            with c_btn:
+                label = "Dismiss" if err_id not in dismissed else "Undismiss"
+                if st.button(label, key=f"dismiss_{err_id}"):
+                    if err_id in dismissed:
+                        dismissed.remove(err_id)
+                    else:
+                        dismissed.add(err_id)
+                    _save_dismissed_errors(dismissed)
+                    st.rerun()
 
     st.divider()
     status, detail = _agent_activity()
@@ -519,17 +586,20 @@ with tabs[0]:
             prompt = (
                 "You are a private agent assistant. Summarize the inbox and the latest proposals in ONE concise paragraph.\n"
                 "Focus on: priorities, risks/blocks, and next actions.\n\n"
+                "Be specific and actionable. Use bullet points for next actions.\n\n"
                 "INBOX:\n"
                 f"{inbox_text or '(empty)'}\n\n"
                 "LATEST_CLAUDE_PROPOSAL_JSON:\n"
                 f"{_json_blob(cpath)}\n\n"
                 "LATEST_OPENAI_REVIEW_JSON:\n"
                 f"{_json_blob(rpath)}\n"
+                "\nEnd with a one-line status verdict: 🟢 All clear, 🟡 Needs attention, or 🔴 Action required."
             )
-            with st.spinner("Briefing..."):
+            with st.spinner("Generating briefing…"):
                 try:
                     from lib.ollama import generate
                     out = generate(model, prompt, timeout=20)
+                    st.session_state["briefing_ts"] = datetime.now(PST).strftime("%b %d, %H:%M:%S")
                     st.session_state["briefing"] = out
                 except Exception as e:
                     st.error(f"Briefing failed or timed out: {e}")
@@ -537,6 +607,8 @@ with tabs[0]:
         if "briefing" in st.session_state:
             st.text_area("Briefing", value=st.session_state["briefing"], height=320)
 
+            if "briefing_ts" in st.session_state:
+                st.caption(f"Generated at {st.session_state['briefing_ts']}")
     st.subheader("Project overview")
     projects_root = Path("/home/hackerman/agent-runtime/workspace/projects")
     projects = [p for p in projects_root.iterdir() if p.is_dir()]
@@ -727,7 +799,7 @@ with tabs[4]:
             return f"{kind} · {stamp} · {short_id}"
         return f"{kind} · {stamp}"
 
-    query = st.text_input("Search", placeholder="Filter by filename...")
+    query = st.text_input("Search", help="Filter by filename...")
     max_items = st.slider("Max items", min_value=5, max_value=100, value=20, step=5)
 
     filtered = [p for p in all_files if query.lower() in p.name.lower()] if query else all_files
@@ -918,15 +990,39 @@ with tabs[6]:
     if not models:
         st.warning("No Ollama models found. Pull one: ollama pull qwen2.5-coder:3b (or similar)")
     else:
+        # Maintain chat history in session state
+        if "chat_history" not in st.session_state:
+            st.session_state["chat_history"] = []
+
+        if st.session_state["chat_history"]:
+            st.markdown("**Conversation history**")
+            for msg in st.session_state["chat_history"][-10:]:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
         model = st.selectbox("Model", models, index=0)
-        prompt = st.text_area("Prompt", height=220, placeholder="Ask anything (local-only).")
+        prompt = st.text_area("Prompt", height=220, help="Ask anything (local-only).")
         if st.button("Send to Ollama"):
             if not prompt.strip():
                 st.warning("Type a prompt first.")
             else:
                 with st.spinner("Thinking..."):
                     out = chat(model, prompt)
-                st.text_area("Response", value=out, height=260)
+                st.session_state["chat_history"].append({"role": "user", "content": prompt})
+                st.session_state["chat_history"].append({"role": "assistant", "content": out})
+                st.rerun()
+
+        col_clear, col_export = st.columns(2)
+        with col_clear:
+            if st.session_state.get("chat_history") and st.button("Clear history"):
+                st.session_state["chat_history"] = []
+                st.rerun()
+        with col_export:
+            if st.session_state.get("chat_history") and st.button("Copy conversation"):
+                export = "\n\n".join(
+                    f"**{m['role'].upper()}**: {m['content']}"
+                    for m in st.session_state["chat_history"]
+                )
+                st.code(export, language="markdown")
 
 with tabs[7]:
     st.subheader("System Logs")
@@ -1149,3 +1245,130 @@ with tabs[8]:
 
     if st.button("Refresh health", key="health_refresh"):
         st.rerun()
+
+
+with tabs[9]:
+    st.subheader("Daily Digest")
+    st.caption("A comprehensive summary of recent agent activity, generated locally via Ollama.")
+
+    def _gather_digest_context(days: int = 1) -> str:
+        """Collect recent events, inbox, and changelog entries for digest."""
+        parts: list[str] = []
+
+        # Recent cycle events
+        cycle_log = Path("/home/hackerman/agent-runtime/logs/dashboard_cycle.jsonl")
+        if cycle_log.exists():
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+            recent_events: list[str] = []
+            try:
+                lines = cycle_log.read_text(encoding="utf-8", errors="ignore").splitlines()
+                for line in reversed(lines[-300:]):
+                    try:
+                        obj = json.loads(line)
+                        ts = obj.get("ts", "")
+                        if ts:
+                            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                            if dt < cutoff:
+                                break
+                        recent_events.append(f"  {_summarize_event(obj)} ({ts})")
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+            if recent_events:
+                parts.append("RECENT CYCLE EVENTS:\n" + "\n".join(recent_events[:30]))
+
+        # Router events
+        router_log = Path("/home/hackerman/agent-runtime/logs/router_events.jsonl")
+        if router_log.exists():
+            router_items: list[str] = []
+            try:
+                lines = router_log.read_text(encoding="utf-8", errors="ignore").splitlines()
+                for line in reversed(lines[-100:]):
+                    try:
+                        obj = json.loads(line)
+                        router_items.append(f"  {_summarize_event(obj)} ({obj.get('ts', '')})")
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+            if router_items:
+                parts.append("ROUTER EVENTS:\n" + "\n".join(router_items[:15]))
+
+        # Inbox
+        inbox_text = read_inbox().strip()
+        if inbox_text:
+            parts.append(f"INBOX:\n{inbox_text[:3000]}")
+
+        # Recent changelogs
+        updates = _recent_updates_global(max_lines=6)
+        if updates:
+            cl_parts = []
+            for u in updates[:4]:
+                cl_parts.append(f"  [{u['project']}] " + " | ".join(u["lines"][:3]))
+            parts.append("RECENT CHANGELOG ENTRIES:\n" + "\n".join(cl_parts))
+
+        # Project statuses
+        projects_root = Path("/home/hackerman/agent-runtime/workspace/projects")
+        if projects_root.exists():
+            statuses: list[str] = []
+            for p in projects_root.iterdir():
+                if p.is_dir():
+                    sp = p / "status.json"
+                    if sp.exists():
+                        try:
+                            data = json.loads(sp.read_text(encoding="utf-8"))
+                            statuses.append(f"  {p.name}: {data.get('status', '?')}")
+                        except Exception:
+                            pass
+            if statuses:
+                parts.append("PROJECT STATUSES:\n" + "\n".join(statuses))
+
+        return "\n\n".join(parts) if parts else "(no data available)"
+
+    try:
+        digest_models = list_models(timeout=4)
+    except Exception:
+        digest_models = []
+
+    if not digest_models:
+        st.warning("No Ollama models available. Pull one to enable digest generation.")
+    else:
+        d_col1, d_col2 = st.columns([2, 1])
+        with d_col1:
+            digest_model = st.selectbox("Model", digest_models, index=0, key="digest_model")
+        with d_col2:
+            digest_days = st.selectbox("Time range", [1, 3, 7], index=0, format_func=lambda d: f"Last {d} day(s)", key="digest_days")
+
+        if st.button("Generate digest", key="gen_digest"):
+            context = _gather_digest_context(days=digest_days)
+            digest_prompt = (
+                "You are an engineering manager's assistant. Write a concise daily digest based on the data below.\n\n"
+                "Structure your response as:\n"
+                "## Status Overview\nOne-paragraph executive summary.\n\n"
+                "## Key Events\nBulleted list of the most important things that happened.\n\n"
+                "## Issues & Risks\nAnything that failed, is blocked, or needs attention.\n\n"
+                "## Next Steps\nRecommended actions.\n\n"
+                f"DATA:\n{context[:10000]}"
+            )
+            with st.spinner("Generating digest…"):
+                try:
+                    from lib.ollama import generate
+                    digest_out = generate(digest_model, digest_prompt, timeout=30)
+                    st.session_state["digest"] = digest_out
+                    st.session_state["digest_ts"] = datetime.now(PST).strftime("%b %d, %H:%M:%S")
+                except Exception as e:
+                    st.error(f"Digest generation failed: {e}")
+
+        if "digest" in st.session_state:
+            st.markdown(st.session_state["digest"])
+            st.caption(f"Generated at {st.session_state.get('digest_ts', '—')}")
+
+# Auto-refresh implementation
+if auto_refresh:
+    import time
+    time.sleep(0.1)  # small delay to let page render
+    st.markdown(
+        '<meta http-equiv="refresh" content="30">',
+        unsafe_allow_html=True,
+    )

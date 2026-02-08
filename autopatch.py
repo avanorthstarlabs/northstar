@@ -168,6 +168,7 @@ def call_openai(prompt: str, model: str) -> str:
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ],
+        max_output_tokens=4000,
     )
     text = ""
     try:
@@ -195,7 +196,7 @@ def call_claude(prompt: str, model: str) -> str:
     )
     msg = client.messages.create(
         model=model,
-        max_tokens=2000,
+        max_tokens=4000,
         temperature=0.2,
         system=system,
         messages=[{"role": "user", "content": prompt}],
@@ -219,6 +220,7 @@ def main():
 
     app_text = (DASH / "app.py").read_text(encoding="utf-8")
 
+    # Keep prompt compact to reduce output truncation
     instructions = f"""
 You are an autonomous engineer improving a local Streamlit dashboard project.
 
@@ -235,9 +237,6 @@ Hard rules:
 - Keep patches small and incremental.
 - Prefer adding UX pages/tabs, summaries, timeline, and "Brief me" feature using Ollama.
 
-Repository files (current):
-{chr(10).join(sorted([str(p.relative_to(DASH)) for p in DASH.rglob('*') if p.is_file()]))}
-
 Current app.py (verbatim):
 {app_text}
 
@@ -247,14 +246,12 @@ Work order:
 General quality gate:
 {quality_gate}
 
-Recent agent outputs (for grounding):
-{context}
-
 Now produce the next patch.
 """.strip()
 
     raw = ""
     diff = ""
+    last_err = ""
     for attempt in range(2):
         extra = "\nREMINDER: Output ONLY unified diff. No markdown. No commentary.\n" if attempt > 0 else ""
         prompt = instructions + extra
@@ -269,14 +266,15 @@ Now produce the next patch.
             validate_diff(diff)
             check_apply(diff)
             break
-        except Exception:
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e}"
             diff = ""
             continue
     if not diff:
         ts = utcnow().replace(":", "-")
         raw_path = LOGS / f"dashboard_patch_raw_{ts}.txt"
         raw_path.write_text(raw, encoding="utf-8")
-        raise ValueError(f"Model output did not contain a valid unified diff after retry. Raw saved to {raw_path.name}")
+        raise ValueError(f"Model output did not contain a valid unified diff after retry ({last_err}). Raw saved to {raw_path.name}")
 
     # Save diff artifact
     ts = utcnow().replace(":", "-")
