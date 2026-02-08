@@ -146,6 +146,141 @@ st.markdown(
         display: none !important;
     }
 
+    /* ── Scrollable tab strip on small screens ────────────────── */
+    div[data-baseweb="tab-list"] {
+        scrollbar-width: thin;
+        scrollbar-color: var(--accent-border) transparent;
+    }
+    div[data-baseweb="tab-list"]::-webkit-scrollbar {
+        height: 4px;
+    }
+    div[data-baseweb="tab-list"]::-webkit-scrollbar-thumb {
+        background: var(--accent-border);
+        border-radius: 4px;
+    }
+
+    /* ── Status badge chips ───────────────────────────────────── */
+    .status-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        line-height: 1;
+        white-space: nowrap;
+    }
+    .status-chip.ok {
+        background: rgba(57, 255, 20, 0.12);
+        border: 1px solid rgba(57, 255, 20, 0.35);
+        color: var(--accent);
+    }
+    .status-chip.warn {
+        background: rgba(255, 170, 0, 0.12);
+        border: 1px solid rgba(255, 170, 0, 0.35);
+        color: var(--warn);
+    }
+    .status-chip.error {
+        background: rgba(255, 68, 68, 0.12);
+        border: 1px solid rgba(255, 68, 68, 0.35);
+        color: var(--danger);
+    }
+    .status-chip.neutral {
+        background: rgba(157, 220, 157, 0.10);
+        border: 1px solid rgba(157, 220, 157, 0.25);
+        color: var(--muted);
+    }
+
+    /* ── Activity timeline ────────────────────────────────────── */
+    .activity-timeline {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+        margin: 8px 0 4px;
+    }
+    .activity-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 8px 0;
+        position: relative;
+    }
+    .activity-item:not(:last-child) {
+        border-left: 2px solid var(--accent-border);
+        margin-left: 5px;
+        padding-left: 16px;
+    }
+    .activity-item:last-child {
+        border-left: 2px solid transparent;
+        margin-left: 5px;
+        padding-left: 16px;
+    }
+    .activity-dot {
+        position: absolute;
+        left: -4px;
+        top: 12px;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--accent);
+        border: 2px solid var(--bg);
+        box-shadow: 0 0 8px rgba(57, 255, 20, 0.4);
+        flex-shrink: 0;
+    }
+    .activity-dot.dimmed {
+        background: var(--muted);
+        box-shadow: none;
+        opacity: 0.5;
+    }
+    .activity-content {
+        flex: 1;
+        min-width: 0;
+    }
+    .activity-ts {
+        font-size: 0.72rem;
+        color: var(--muted);
+        opacity: 0.7;
+    }
+    .activity-text {
+        font-size: 0.82rem;
+        color: var(--text);
+        line-height: 1.4;
+    }
+
+    /* ── Overview hero grid ───────────────────────────────────── */
+    .hero-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 12px;
+        margin: 8px 0 16px;
+    }
+    .hero-stat {
+        padding: 14px 16px;
+        border-radius: 12px;
+        background: var(--panel);
+        border: 1px solid var(--accent-border);
+        backdrop-filter: blur(8px);
+        text-align: center;
+    }
+    .hero-stat .value {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--accent);
+        line-height: 1.2;
+    }
+    .hero-stat .label {
+        font-size: 0.72rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin-top: 4px;
+    }
+    div[data-baseweb="tab-border"] {
+        display: none !important;
+    }
+
     /* ── Section headers ──────────────────────────────────────── */
     .section-header {
         font-size: 1.15rem;
@@ -851,58 +986,122 @@ _render_sidebar()
 with tabs[0]:
     st.markdown('<div class="section-header">Status Snapshot</div>', unsafe_allow_html=True)
 
-    patterns = ["claude_*.json", "review_claude_*__by_openai.json"]
-    all_files = list_matching(patterns)
-    latest_any = _latest_file(all_files)
-    latest_review_file = _latest_file([p for p in all_files if p.name.startswith("review_claude_")])
+    _ov_patterns = ["claude_*.json", "review_claude_*__by_openai.json"]
+    _ov_all_files = list_matching(_ov_patterns)
+    _ov_latest_any = _latest_file(_ov_all_files)
+    _ov_latest_review_file = _latest_file([p for p in _ov_all_files if p.name.startswith("review_claude_")])
     inbox_raw = read_inbox()
+    _ov_inbox_count = len([l for l in inbox_raw.splitlines() if l.strip()])
 
-    snapshot_col, activity_col = st.columns([1.3, 1], gap="large")
-    with snapshot_col:
-        st.markdown('<div class="section-header" style="margin-top:0;">📊 Snapshot</div>', unsafe_allow_html=True)
+    # System health data
+    _ov_health, _ov_reason = _read_cycle_health()
+    _ov_ps, _ = _read_project_status()
+    _ov_health_label, _ov_health_note = _cycle_label(_ov_health, _ov_ps)
+    _ov_provider, _ov_model = _active_provider_model()
+    _ov_credit_status, _ov_credit_note = _credit_snapshot()
+    _ov_last_cycle = _last_cycle_ts()
 
-        # Top row: key numbers
-        row1 = st.columns(4)
-        row1[0].metric("Proposals", len(all_files))
-        row1[1].metric("Inbox items", len([l for l in inbox_raw.splitlines() if l.strip()]))
-        row1[2].metric("Latest activity", _fmt_time(stat_mtime_iso(latest_any)) if latest_any else "—")
-        row1[3].metric("Latest review", _fmt_time(stat_mtime_iso(latest_review_file)) if latest_review_file else "—")
+    # Status chips
+    def _chip(label: str, variant: str) -> str:
+        return f'<span class="status-chip {variant}">{label}</span>'
 
-        # Second row: system health
-        health, reason = _read_cycle_health()
-        _ps, _ = _read_project_status()
-        health_label, _ = _cycle_label(health, _ps)
-        provider, model = _active_provider_model()
-        credit_status, credit_note = _credit_snapshot()
+    _ov_health_variant = "ok" if _ov_health_label == "ok" else ("warn" if _ov_health_label == "warn" else ("error" if _ov_health_label == "error" else "neutral"))
+    _ov_credit_variant = "ok" if _ov_credit_status == "ok" else ("warn" if _ov_credit_status == "low" else "neutral")
+    _ov_status_variant = "ok" if _ov_ps == "IN_PROGRESS" else ("warn" if _ov_ps == "PENDING_HUMAN_REVIEW" else ("ok" if _ov_ps == "DONE" else "neutral"))
 
-        row2 = st.columns(3)
-        row2[0].metric("Cycle health", health_label.upper())
-        row2[1].metric("Provider", provider.upper() if provider else "UNKNOWN")
-        row2[2].metric("Credits", credit_status.upper())
+    # Hero stat grid (HTML for tighter layout)
+    _ov_latest_activity_str = _fmt_time(stat_mtime_iso(_ov_latest_any)) if _ov_latest_any else "—"
+    _ov_latest_review_str = _fmt_time(stat_mtime_iso(_ov_latest_review_file)) if _ov_latest_review_file else "—"
+    _ov_cycle_age_str = "—"
+    if _ov_last_cycle:
+        _ov_age_min = (datetime.now(timezone.utc) - _ov_last_cycle).total_seconds() / 60.0
+        _ov_cycle_age_str = f"{_ov_age_min:.0f}m" if _ov_age_min < 60 else f"{_ov_age_min/60:.1f}h"
 
-        # Contextual caption
+    st.markdown(
+        f"""
+        <div class="hero-grid">
+            <div class="hero-stat"><div class="value">{len(_ov_all_files)}</div><div class="label">Proposals</div></div>
+            <div class="hero-stat"><div class="value">{_ov_inbox_count}</div><div class="label">Inbox Items</div></div>
+            <div class="hero-stat"><div class="value">{_ov_latest_activity_str}</div><div class="label">Last Activity</div></div>
+            <div class="hero-stat"><div class="value">{_ov_cycle_age_str}</div><div class="label">Cycle Age</div></div>
+            <div class="hero-stat"><div class="value">{_ov_provider.upper() if _ov_provider else '?'}</div><div class="label">Provider</div></div>
+            <div class="hero-stat"><div class="value">{_ov_latest_review_str}</div><div class="label">Last Review</div></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Status chips row
+    st.markdown(
+        f"""
+        <div style="display:flex; flex-wrap:wrap; gap:10px; margin:0 0 16px;">
+            {_chip('Cycle: ' + _ov_health_label.upper(), _ov_health_variant)}
+            {_chip('Project: ' + _ov_ps, _ov_status_variant)}
+            {_chip('Credits: ' + _ov_credit_status.upper(), _ov_credit_variant)}
+        </div>
+        <div style="font-size:0.78rem; color:var(--muted); line-height:1.6; margin-bottom:12px;">
+            🔧 {_ov_reason} · Patch: <code>{_latest_patch_name()}</code> · Model: <code>{_ov_model}</code>
+            {(' · ' + _ov_health_note) if _ov_health_note else ''}<br>
+            💳 {_ov_credit_note}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Two-column: Activity feed + Failures
+    _ov_left, _ov_right = st.columns([1.2, 1], gap="large")
+
+    with _ov_left:
+        st.markdown('<div class="section-header" style="margin-top:0;">🤖 Activity Feed</div>', unsafe_allow_html=True)
+        _ov_status, _ov_detail = _agent_activity()
+        _ov_status_label = "CONNECTED" if _ov_status == "active" else ("IDLE" if _ov_status == "idle" else "UNKNOWN")
+        _ov_accent = "var(--accent)" if _ov_status == "active" else "var(--muted)"
+        _ov_pulse = '<span class="pulse"></span>' if _ov_status == "active" else ""
+
         st.markdown(
-            f'<div style="font-size:0.78rem; color:var(--muted); margin:-6px 0 8px; line-height:1.6;">'
-            f'🔧 {reason} · Patch: <code>{_latest_patch_name()}</code><br>'
-            f'🤖 Model: <code>{model}</code> · {credit_note}'
-            f'</div>',
+            f'<div style="font-size:0.85rem; margin-bottom:10px;">'
+            f'{_ov_pulse}<span style="color:{_ov_accent};font-weight:700;">{_ov_status_label}</span>'
+            f' — {_ov_detail}</div>',
             unsafe_allow_html=True,
         )
 
-        failures = _recent_failures(2)
+        feed = _activity_feed(limit=8)
+        if feed:
+            timeline_items = []
+            for i, item in enumerate(feed):
+                dot_class = "" if i == 0 else "dimmed"
+                timeline_items.append(
+                    f'<div class="activity-item">'
+                    f'<div class="activity-dot {dot_class}"></div>'
+                    f'<div class="activity-content">'
+                    f'<div class="activity-ts">{_fmt_time(item["ts"])}</div>'
+                    f'<div class="activity-text">{item["summary"]}</div>'
+                    f'</div></div>'
+                )
+            st.markdown(
+                f'<div class="activity-timeline">{"".join(timeline_items)}</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.caption("No recent activity found.")
+
+    with _ov_right:
+        st.markdown('<div class="section-header" style="margin-top:0;">⚠️ Recent Failures</div>', unsafe_allow_html=True)
+        failures = _recent_failures(3)
         dismissed = _load_dismissed_errors()
         if failures:
-            st.markdown("**Recent failures**")
             show_dismissed = st.toggle("Show dismissed", value=False, key="show_dismissed_errors")
+            _any_shown = False
             for line in failures:
                 err_id = _error_id(line)
                 if (err_id in dismissed) and not show_dismissed:
                     continue
-                c_err, c_btn = st.columns([18, 2])
+                _any_shown = True
+                c_err, c_btn = st.columns([14, 3])
                 with c_err:
                     _failure_row(line[:400], key=err_id)
                 with c_btn:
-                    label = "Dismiss" if err_id not in dismissed else "Undismiss"
+                    label = "Dismiss" if err_id not in dismissed else "Restore"
                     if st.button(label, key=f"dismiss_{err_id}"):
                         if err_id in dismissed:
                             dismissed.remove(err_id)
@@ -910,40 +1109,10 @@ with tabs[0]:
                             dismissed.add(err_id)
                         _save_dismissed_errors(dismissed)
                         st.rerun()
+            if not _any_shown:
+                st.success("All failures dismissed.")
         else:
-            st.caption("No recent failures.")
-
-    with activity_col:
-        st.markdown('<div class="section-header" style="margin-top:0;">🤖 Agent Activity</div>', unsafe_allow_html=True)
-        status, detail = _agent_activity()
-        status_label = "CONNECTED" if status == "active" else ("IDLE" if status == "idle" else "UNKNOWN")
-        accent = "var(--accent)" if status == "active" else "var(--muted)"
-        pulse = '<span class="pulse"></span>' if status == "active" else ""
-        st.markdown(
-            f"""
-            <div class="glass-card">
-                <div class="glass-title" style="font-size:1rem;">Agent Connection</div>
-                <div class="glass-meta" style="margin:8px 0 4px;">Status: {pulse}<span style="color:{accent};font-weight:700;font-size:0.95rem;">{status_label}</span></div>
-                <div class="glass-meta" style="line-height:1.6;">{detail}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        feed = _activity_feed(limit=6)
-        if feed:
-            st.markdown(
-                '<div style="font-size:0.85rem; font-weight:600; color:var(--accent); margin:14px 0 6px;">Live Activity</div>',
-                unsafe_allow_html=True,
-            )
-            for item in feed:
-                st.markdown(
-                    f'<div style="font-size:0.8rem; color:var(--text); padding:3px 0; border-left:2px solid var(--accent-border); padding-left:10px; margin:2px 0;">'
-                    f'<span style="color:var(--muted);">{_fmt_time(item["ts"])}</span> · {item["summary"]}'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-        else:
-            st.caption("No recent activity found.")
+            st.success("No recent failures — all clear.")
 
     st.divider()
     st.markdown('<div class="section-header">🎛️ Review & Cycle Control</div>', unsafe_allow_html=True)
@@ -972,7 +1141,7 @@ with tabs[0]:
 
     with ctrl_cols[1]:
         st.markdown("**Cycle control**")
-        last_cycle = _last_cycle_ts()
+        last_cycle = _ov_last_cycle
         if last_cycle:
             age_min = (datetime.now(timezone.utc) - last_cycle).total_seconds() / 60.0
             if age_min >= 30:
