@@ -28,7 +28,7 @@ ICON_PATH = APP_ROOT / "assets" / "icon.png"
 PST = ZoneInfo("America/Los_Angeles")
 
 page_icon = str(ICON_PATH) if ICON_PATH.exists() else ":)"
-st.set_page_config(page_title="Agent Runtime Dashboard", layout="wide", page_icon=page_icon, initial_sidebar_state="expanded")
+st.set_page_config(page_title="Agent Runtime Dashboard", layout="wide", page_icon=page_icon, initial_sidebar_state="collapsed")
 
 # ── Global CSS ───────────────────────────────────────────────────
 st.markdown(
@@ -463,6 +463,118 @@ st.markdown(
         background: rgba(7, 12, 7, 0.5);
         font-family: monospace;
     }
+
+    /* ── Sidebar navigation overhaul ──────────────────────────── */
+    section[data-testid="stSidebar"] > div:first-child {
+        padding-top: 1rem;
+    }
+    .sidebar-nav {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        margin: 0 -8px 12px;
+    }
+    .sidebar-nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 14px;
+        border-radius: 8px;
+        font-size: 0.82rem;
+        color: var(--muted);
+        cursor: default;
+        transition: all 120ms ease;
+        border: 1px solid transparent;
+    }
+    .sidebar-nav-item:hover {
+        background: var(--accent-soft);
+        color: var(--accent);
+        border-color: var(--accent-border);
+    }
+    .sidebar-nav-item .nav-icon {
+        font-size: 1rem;
+        width: 22px;
+        text-align: center;
+        flex-shrink: 0;
+    }
+    .sidebar-nav-item .nav-label {
+        font-weight: 500;
+    }
+    .sidebar-nav-item .nav-badge {
+        margin-left: auto;
+        background: var(--accent-soft);
+        border: 1px solid var(--accent-border);
+        color: var(--accent);
+        font-size: 0.68rem;
+        font-weight: 700;
+        padding: 1px 7px;
+        border-radius: 10px;
+        line-height: 1.4;
+    }
+
+    /* ── Sidebar compact status card ──────────────────────────── */
+    .sb-status-card {
+        border: 1px solid var(--accent-border);
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-bottom: 14px;
+        background: rgba(7, 12, 7, 0.5);
+        backdrop-filter: blur(6px);
+    }
+    .sb-status-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.82rem;
+        padding: 3px 0;
+    }
+    .sb-status-row .sb-icon {
+        width: 18px;
+        text-align: center;
+        flex-shrink: 0;
+    }
+    .sb-status-row .sb-label {
+        color: var(--muted);
+        min-width: 52px;
+    }
+    .sb-status-row .sb-value {
+        color: var(--text);
+        font-weight: 600;
+    }
+    .sb-status-row .sb-value.ok { color: var(--accent); }
+    .sb-status-row .sb-value.warn { color: var(--warn); }
+    .sb-status-row .sb-value.error { color: var(--danger); }
+    .sb-status-row .sb-value.neutral { color: var(--muted); }
+
+    .sb-divider {
+        border: none;
+        border-top: 1px solid var(--accent-border);
+        margin: 10px 0;
+    }
+
+    .sb-section-label {
+        font-size: 0.68rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+        opacity: 0.6;
+        margin: 14px 0 6px;
+        padding-left: 2px;
+    }
+
+    /* ── Sidebar action buttons ───────────────────────────────── */
+    section[data-testid="stSidebar"] .stButton > button {
+        font-size: 0.8rem;
+        padding: 6px 12px;
+        border-radius: 8px;
+        width: 100%;
+        justify-content: flex-start;
+        gap: 8px;
+    }
+    section[data-testid="stSidebar"] .stButton > button:hover {
+        background: var(--accent-soft);
+        transform: translateX(2px);
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -689,49 +801,81 @@ def _touch_trigger(note: str) -> None:
 
 def _render_sidebar() -> None:
     with st.sidebar:
-        st.markdown("### ⚙️ Dashboard")
+        # ── Branding ─────────────────────────────────────────────
+        if LOGO_PATH.exists():
+            st.image(str(LOGO_PATH), width=48)
+        st.markdown(
+            '<div style="font-size:0.95rem; font-weight:700; color:var(--accent); margin:-4px 0 2px;">Agent Runtime</div>'
+            '<div style="font-size:0.65rem; color:var(--muted); opacity:0.6; letter-spacing:0.06em; text-transform:uppercase; margin-bottom:8px;">Control Center</div>',
+            unsafe_allow_html=True,
+        )
 
-        # Quick status summary
+        # ── Compact status card ──────────────────────────────────
         _sb_status, _sb_status_ts = _read_project_status()
         _sb_health, _sb_health_reason = _read_cycle_health()
         _sb_health_label, _sb_health_note = _cycle_label(_sb_health, _sb_status)
-        _sb_health_icon = "🟢" if _sb_health_label == "ok" else ("🟡" if _sb_health_label == "warn" else ("🔴" if _sb_health_label == "error" else "⚪"))
-        _sb_status_icon = {"IN_PROGRESS": "🔄", "DONE": "✅", "PENDING_HUMAN_REVIEW": "⏳"}.get(_sb_status, "❓")
+        _sb_health_variant = "ok" if _sb_health_label == "ok" else ("warn" if _sb_health_label == "warn" else ("error" if _sb_health_label == "error" else "neutral"))
+        _sb_status_variant = "ok" if _sb_status == "IN_PROGRESS" else ("warn" if _sb_status == "PENDING_HUMAN_REVIEW" else ("ok" if _sb_status == "DONE" else "neutral"))
+        _sb_provider, _sb_model = _active_provider_model()
+        _sb_last_cycle = _last_cycle_ts()
+        _sb_cycle_str = "—"
+        if _sb_last_cycle:
+            _sb_age = (datetime.now(timezone.utc) - _sb_last_cycle).total_seconds() / 60.0
+            _sb_cycle_str = f"{_sb_age:.0f}m ago" if _sb_age < 60 else f"{_sb_age/60:.1f}h ago"
+
+        _sb_patterns = ["claude_*.json", "review_claude_*__by_openai.json"]
+        _sb_all_files = list_matching(_sb_patterns)
+        _sb_inbox_raw = read_inbox()
+        _sb_inbox_lines = len([l for l in _sb_inbox_raw.splitlines() if l.strip()])
 
         st.markdown(
             f"""
-            <div style="border:1px solid rgba(57,255,20,0.2); border-radius:10px; padding:10px 12px; margin-bottom:12px;
-                         background:rgba(7,12,7,0.5); font-size:0.85rem;">
-                <div style="margin-bottom:4px;">{_sb_health_icon} <b>Cycle:</b> {_sb_health_label.upper()}</div>
-                <div style="margin-bottom:4px;">{_sb_status_icon} <b>Project:</b> {_sb_status}</div>
-                <div style="opacity:0.7;">Last status update: {_fmt_time(_sb_status_ts) if _sb_status_ts else '—'}</div>
-                <div style="opacity:0.7;">Recent cycle health: {_sb_health_reason}{' · ' + _sb_health_note if _sb_health_note else ''}</div>
+            <div class="sb-status-card">
+                <div class="sb-status-row">
+                    <span class="sb-icon">●</span>
+                    <span class="sb-label">Cycle</span>
+                    <span class="sb-value {_sb_health_variant}">{_sb_health_label.upper()}</span>
+                </div>
+                <div class="sb-status-row">
+                    <span class="sb-icon">◉</span>
+                    <span class="sb-label">Project</span>
+                    <span class="sb-value {_sb_status_variant}">{_sb_status}</span>
+                </div>
+                <div class="sb-status-row">
+                    <span class="sb-icon">⏱</span>
+                    <span class="sb-label">Last</span>
+                    <span class="sb-value neutral">{_sb_cycle_str}</span>
+                </div>
+                <div class="sb-status-row">
+                    <span class="sb-icon">⚡</span>
+                    <span class="sb-label">Provider</span>
+                    <span class="sb-value neutral">{_sb_provider.upper() if _sb_provider else '?'}</span>
+                </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-        auto_refresh = st.toggle("Auto-refresh (30s)", value=False, key="auto_refresh")
-        if auto_refresh:
-            st.caption("Page will refresh every 30 seconds.")
-
-        st.divider()
-        st.markdown("### 🚀 Quick Actions")
-        if st.button("🔄 Refresh now", key="sidebar_refresh", use_container_width=True):
+        # ── Quick actions ────────────────────────────────────────
+        st.markdown('<div class="sb-section-label">Quick Actions</div>', unsafe_allow_html=True)
+        if st.button("🔄  Refresh", key="sidebar_refresh", use_container_width=True):
             st.rerun()
-        if st.button("📋 Brief me", key="sidebar_brief", use_container_width=True):
+        if st.button("📋  Brief me", key="sidebar_brief", use_container_width=True):
             st.session_state["_jump_to_brief"] = True
             st.rerun()
-        if st.button("💬 Open chat", key="sidebar_chat", use_container_width=True):
+        if st.button("💬  Chat", key="sidebar_chat", use_container_width=True):
             st.session_state["_jump_to_chat"] = True
             st.rerun()
-        if st.button("📝 Notes", key="sidebar_notes", use_container_width=True):
+        if st.button("📝  Notes", key="sidebar_notes", use_container_width=True):
             st.session_state["_jump_to_notes"] = True
             st.rerun()
+        if st.button("⚡  Kick cycle", key="sidebar_kick", use_container_width=True):
+            _touch_trigger("sidebar_kick")
+            st.success("Cycle triggered.")
+            st.rerun()
 
-        # Pinned note (quick sticky)
-        st.divider()
-        st.markdown("### 📌 Pinned Note")
+        # ── Pinned note ─────────────────────────────────────────
+        st.markdown('<div class="sb-section-label">📌 Pinned Note</div>', unsafe_allow_html=True)
         _pin_path = Path("/home/hackerman/agent-runtime/workspace/projects/agent-dashboard/pinned_note.txt")
         _pin_text = ""
         if _pin_path.exists():
@@ -741,32 +885,45 @@ def _render_sidebar() -> None:
                 pass
         if _pin_text:
             st.markdown(
-                f'<div style="border:1px solid rgba(57,255,20,0.25); border-radius:8px; padding:8px 10px; '
-                f'background:rgba(7,12,7,0.5); font-size:0.82rem; color:#eaffea; white-space:pre-wrap;">'
+                f'<div style="border:1px solid var(--accent-border); border-radius:8px; padding:8px 10px; '
+                f'background:rgba(7,12,7,0.4); font-size:0.78rem; color:var(--text); white-space:pre-wrap; line-height:1.5;">'
                 f'{_html.escape(_pin_text[:200])}</div>',
                 unsafe_allow_html=True,
             )
         else:
-            st.caption("No pinned note. Add one in the Notes tab.")
+            st.caption("No pinned note yet.")
 
+        # ── Stats ────────────────────────────────────────────────
+        st.markdown('<div class="sb-section-label">Stats</div>', unsafe_allow_html=True)
 
-        st.divider()
-        st.markdown("### 📊 Quick Stats")
-        _sb_patterns = ["claude_*.json", "review_claude_*__by_openai.json"]
-        _sb_all_files = list_matching(_sb_patterns)
-        _sb_inbox_raw = read_inbox()
-        _sb_inbox_lines = len([l for l in _sb_inbox_raw.splitlines() if l.strip()])
-        st.caption(f"📄 {len(_sb_all_files)} proposals")
-        st.caption(f"📥 {_sb_inbox_lines} inbox items")
-        _sb_last_cycle = _last_cycle_ts()
-        if _sb_last_cycle:
-            _sb_age = (datetime.now(timezone.utc) - _sb_last_cycle).total_seconds() / 60.0
-            if _sb_age < 60:
-                st.caption(f"⏱️ Last cycle: {_sb_age:.0f}m ago")
-            else:
-                st.caption(f"⏱️ Last cycle: {_sb_age/60:.1f}h ago")
-        else:
-            st.caption("⏱️ No cycle history")
+        st.markdown(
+            f"""
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:8px;">
+                <div style="text-align:center; padding:8px 4px; border-radius:8px; background:rgba(7,12,7,0.4); border:1px solid var(--accent-border);">
+                    <div style="font-size:1.1rem; font-weight:700; color:var(--accent);">{len(_sb_all_files)}</div>
+                    <div style="font-size:0.65rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em;">Proposals</div>
+                </div>
+                <div style="text-align:center; padding:8px 4px; border-radius:8px; background:rgba(7,12,7,0.4); border:1px solid var(--accent-border);">
+                    <div style="font-size:1.1rem; font-weight:700; color:var(--accent);">{_sb_inbox_lines}</div>
+                    <div style="font-size:0.65rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em;">Inbox</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # ── Auto-refresh toggle ──────────────────────────────────
+        st.markdown('<hr class="sb-divider">', unsafe_allow_html=True)
+        auto_refresh = st.toggle("Auto-refresh (30s)", value=False, key="auto_refresh")
+        if auto_refresh:
+            st.caption("⟳ Refreshing every 30s")
+
+        # ── Timestamp ────────────────────────────────────────────
+        st.markdown(
+            f'<div style="font-size:0.65rem; color:var(--muted); opacity:0.4; margin-top:12px; text-align:center;">'
+            f'{datetime.now(PST).strftime("%H:%M PST")}</div>',
+            unsafe_allow_html=True,
+        )
 
 def _latest_patch_name() -> str:
     logs = Path("/home/hackerman/agent-runtime/logs")
