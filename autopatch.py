@@ -178,6 +178,33 @@ def call_openai(prompt: str, model: str) -> str:
                     text += getattr(c, "text", "")
     return text
 
+def call_claude(prompt: str, model: str) -> str:
+    from anthropic import Anthropic
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY not set")
+    client = Anthropic(api_key=api_key)
+    system = (
+        "You are an autonomous code editor. "
+        "Return ONLY a unified diff. "
+        "The first line MUST start with: diff --git "
+        "No markdown, no commentary, no extra text. "
+        "Do NOT modify CHANGELOG.md; it is updated automatically. "
+        "Keep changes small (aim for <= 120 lines changed)."
+    )
+    msg = client.messages.create(
+        model=model,
+        max_tokens=2000,
+        temperature=0.2,
+        system=system,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw = ""
+    for block in msg.content:
+        if getattr(block, "type", None) == "text":
+            raw += block.text
+    return raw
+
 def main():
     model = os.environ.get("AUTOPATCH_MODEL", "qwen2.5-coder:7b")
     provider = os.environ.get("AUTOPATCH_PROVIDER", "ollama").strip().lower()
@@ -228,6 +255,8 @@ Now produce the next patch.
         prompt = instructions + extra
         if provider in ("codex", "openai"):
             raw = call_openai(prompt, model=model)
+        elif provider == "claude":
+            raw = call_claude(prompt, model=os.environ.get("CLAUDE_MODEL", "claude-opus-4-6"))
         else:
             raw = call_ollama(prompt, model=model)
         try:
