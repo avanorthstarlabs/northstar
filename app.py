@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import re
@@ -39,7 +40,7 @@ st.set_page_config(page_title="Agent Runtime Dashboard", layout="wide", page_ico
 st.markdown(
     """
     <style>
-    :root {
+    :root { 
         --bg: #050705;
         --panel: rgba(7, 12, 7, 0.72);
         --panel-hover: rgba(12, 22, 12, 0.85);
@@ -74,6 +75,10 @@ st.markdown(
         border-color: var(--accent) !important;
     }
     /* Glass grid & cards */
+    .card-title-row{display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:6px;}
+    .card-title-row .title{font-weight:700; font-size:1.02rem; color:var(--accent); margin:0;}
+    .card-title-row .meta{font-size:0.74rem; color:var(--muted); opacity:0.85; white-space:nowrap;}
+    .subtle{font-size:0.78rem;color:var(--muted);line-height:1.6;opacity:0.85;}
     .glass-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin:12px 0 20px;}
     .glass-card {
         padding:16px 18px;border-radius:14px;
@@ -95,6 +100,15 @@ st.markdown(
         margin-right:8px;background:var(--accent);
         box-shadow:0 0 12px rgba(57,255,20,0.6);
         animation:pulse 1.6s ease-in-out infinite;
+    }
+    /* Compact data strip */
+    .data-strip{
+        display:flex; flex-wrap:wrap; gap:10px;
+        padding:10px 12px; margin: 8px 0 14px;
+        border-radius: 12px;
+        background: rgba(7, 12, 7, 0.45);
+        border: 1px solid var(--accent-border);
+        backdrop-filter: blur(6px);
     }
     @keyframes pulse {
         0% {transform:scale(0.9); opacity:0.6;}
@@ -595,6 +609,70 @@ st.markdown(
         transition: all 0.2s ease;
         box-sizing: border-box;
     }
+
+    /* ── Inbox: editor + preview overhaul ─────────────────────── */
+    .inbox-shell{
+        display:flex; flex-direction:column; gap:10px;
+        padding: 14px 16px;
+        border-radius: 14px;
+        background: var(--panel);
+        border: 1px solid var(--accent-border);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 6px 28px rgba(0,0,0,0.35);
+    }
+    .inbox-shell .hint{
+        font-size:0.78rem; color:var(--muted); opacity:0.8; line-height:1.5;
+    }
+    .inbox-help-card{
+        padding: 14px 16px;
+        border-radius: 14px;
+        background: rgba(7, 12, 7, 0.40);
+        border: 1px solid var(--accent-border);
+        backdrop-filter: blur(8px);
+    }
+    .inbox-help-card h4{
+        margin:0 0 8px;
+        font-size:0.9rem;
+        color: var(--accent);
+        letter-spacing:0.02em;
+    }
+    .pill{
+        display:inline-flex; align-items:center; gap:8px;
+        padding:5px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--accent-border);
+        background: rgba(7, 12, 7, 0.45);
+        color: var(--muted);
+        font-size: 0.74rem;
+        white-space: nowrap;
+    }
+    .pill strong{color:var(--text); font-weight:700;}
+    .pill.urgent{border-color: rgba(255,68,68,0.35); color: rgba(255,170,170,0.95);}
+    .pill.urgent strong{color: var(--danger);}
+    .inbox-preview{
+        border:1px solid var(--accent-border);
+        border-radius: 14px;
+        background: rgba(7, 12, 7, 0.35);
+        padding: 10px 12px;
+        max-height: 420px;
+        overflow: auto;
+    }
+    .inbox-line{
+        display:flex; gap:10px; align-items:flex-start;
+        padding: 7px 6px;
+        border-radius: 10px;
+        transition: background 120ms ease, border-color 120ms ease;
+        border:1px solid transparent;
+    }
+    .inbox-line:hover{
+        background: rgba(57,255,20,0.06);
+        border-color: var(--accent-border);
+    }
+    .inbox-dot{margin-top:3px; width:10px; height:10px; border-radius:50%; background: var(--accent); box-shadow: 0 0 10px rgba(57,255,20,0.25); flex-shrink:0;}
+    .inbox-dot.urgent{background: var(--danger); box-shadow: 0 0 10px rgba(255,68,68,0.25);}
+    .inbox-text{font-size:0.82rem; color:var(--text); line-height:1.45; word-break:break-word;}
+    .inbox-empty{padding: 26px 10px; text-align:center; color:var(--muted); opacity:0.75; font-size:0.85rem;}
+
     section[data-testid="stSidebar"] .sb-link-btn:hover {
         background: var(--accent-soft);
         border-color: var(--accent);
@@ -913,6 +991,17 @@ def _touch_trigger(note: str) -> None:
             f.write(f"{note} {ts}\n")
     except Exception:
         pass
+
+def _inbox_is_urgent(line: str) -> bool:
+    s = (line or "").strip().lower()
+    if not s:
+        return False
+    # Common urgency patterns: leading tokens, markers, and high-signal words
+    if s.startswith(("urgent:", "critical:", "blocker:", "asap:", "hotfix:")):
+        return True
+    if "!!!" in s:
+        return True
+    return any(kw in s for kw in (" urgent", " critical", " blocker", " asap", "sev1", "sev-1"))
 
 def _render_sidebar() -> None:
     with st.sidebar:
@@ -1378,6 +1467,121 @@ def _activity_feed(limit: int = 6) -> list[dict]:
         })
     return out
 
+
+def _chip(label: str, variant: str) -> str:
+    return f'<span class="status-chip {variant}">{label}</span>'
+
+
+def _first_sentence(text: str) -> str:
+    if not text:
+        return ""
+    for sep in (". ", ".\n", ".\t"):
+        if sep in text:
+            return text.split(sep, 1)[0].strip() + "."
+    return text.strip()
+
+
+def _as_list(value) -> list[str]:
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    if value:
+        return [str(value).strip()]
+    return []
+
+
+def _tech_notes(payload: dict) -> str:
+    text = " ".join(
+        [
+            str(payload.get("summary") or ""),
+            str(payload.get("context") or ""),
+            str(payload.get("reasoning") or ""),
+            " ".join(_as_list(payload.get("suggested_actions"))),
+        ]
+    ).lower()
+    keywords = [
+        "solana",
+        "base",
+        "evm",
+        "supabase",
+        "postgres",
+        "postgresql",
+        "next.js",
+        "react",
+        "tailwind",
+        "streamlit",
+        "wallet",
+        "multisig",
+        "safe",
+        "squads",
+        "intent",
+        "policy",
+        "approval",
+        "api",
+        "sdk",
+        "dashboard",
+        "agent",
+        "automation",
+        "workflow",
+        "python",
+    ]
+    found = [k for k in keywords if k in text]
+    return ", ".join(sorted(set(found))) if found else "—"
+
+
+def _edge_from_text(payload: dict) -> str:
+    text = " ".join(
+        [
+            str(payload.get("summary") or ""),
+            str(payload.get("context") or ""),
+            str(payload.get("reasoning") or ""),
+        ]
+    ).lower()
+    if "approval" in text or "policy" in text or "audit" in text:
+        return "Safety-first approvals and audit trail."
+    if "speed" in text or "fast" in text:
+        return "Speed to execution with clear guardrails."
+    if "accuracy" in text:
+        return "Trustworthy reporting and visibility."
+    return "Clear scope + rapid iteration."
+
+
+def _investor_synopsis(payload: dict) -> dict[str, str]:
+    summary = str(payload.get("summary") or "").strip()
+    context = str(payload.get("context") or "").strip()
+    reasoning = str(payload.get("reasoning") or "").strip()
+    actions = _as_list(payload.get("suggested_actions"))
+    return {
+        "what": summary or _first_sentence(context),
+        "why": _first_sentence(reasoning) or _first_sentence(context),
+        "edge": _edge_from_text(payload),
+        "next": actions[0] if actions else "Review proposal details.",
+        "tech": _tech_notes(payload),
+    }
+
+
+def _http_probe(url: str, expect_json_status: bool = False, timeout: int = 2) -> tuple[str, str]:
+    import urllib.request
+    import json as _json
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            status = r.status
+            body = r.read(2000).decode("utf-8", "ignore")
+        if 200 <= status < 400:
+            if expect_json_status:
+                try:
+                    data = _json.loads(body)
+                    st_val = str(data.get("status") or data.get("state") or "").lower()
+                    if st_val in ("ok", "healthy", "ready", "running"):
+                        return "ok", f"HTTP {status} · {st_val}"
+                    if st_val:
+                        return "warn", f"HTTP {status} · {st_val}"
+                except Exception:
+                    pass
+            return "ok", f"HTTP {status}"
+        return "error", f"HTTP {status}"
+    except Exception as e:
+        return "error", f"{type(e).__name__}: {e}"
+
 # ── Header (rendered after helpers are defined) ──────────────────
 cols_title = st.columns([1, 8])
 with cols_title[0]:
@@ -1446,9 +1650,6 @@ with tabs[0]:
     _ov_last_cycle = _last_cycle_ts()
 
     # Status chips
-    def _chip(label: str, variant: str) -> str:
-        return f'<span class="status-chip {variant}">{label}</span>'
-
     _ov_health_variant = "ok" if _ov_health_label == "ok" else ("warn" if _ov_health_label == "warn" else ("error" if _ov_health_label == "error" else "neutral"))
     _ov_credit_variant = "ok" if _ov_credit_status == "ok" else ("warn" if _ov_credit_status == "low" else "neutral")
     _ov_status_variant = "ok" if _ov_ps == "IN_PROGRESS" else ("warn" if _ov_ps == "PENDING_HUMAN_REVIEW" else ("ok" if _ov_ps == "DONE" else "neutral"))
@@ -1478,7 +1679,7 @@ with tabs[0]:
     # Status chips row
     st.markdown(
         f"""
-        <div style="display:flex; flex-wrap:wrap; gap:10px; margin:0 0 16px;">
+        <div class="data-strip">
             {_chip('Cycle: ' + _ov_health_label.upper(), _ov_health_variant)}
             {_chip('Project: ' + _ov_ps, _ov_status_variant)}
             {_chip('Credits: ' + _ov_credit_status.upper(), _ov_credit_variant)}
@@ -1491,6 +1692,86 @@ with tabs[0]:
         """,
         unsafe_allow_html=True,
     )
+
+    # Latest proposal quick-approval
+    st.markdown('<div class="section-header">🧾 Latest Proposal</div>', unsafe_allow_html=True)
+    _ov_proposals = [p for p in _ov_all_files if not p.name.startswith("review_")]
+    _ov_latest_proposal = _latest_file(_ov_proposals)
+    if not _ov_latest_proposal:
+        st.caption("No proposals available yet.")
+    else:
+        try:
+            _ov_payload = read_json_file(_ov_latest_proposal)
+        except Exception:
+            _ov_payload = {}
+        _ov_decision = read_decision(_ov_latest_proposal)
+        _ov_summary = str(_ov_payload.get("summary") or "").strip()
+        _ov_context = str(_ov_payload.get("context") or "").strip()
+        _ov_id = str(_ov_payload.get("proposal_id") or _ov_latest_proposal.stem)
+        _ov_mode = str(_ov_payload.get("mode") or "—")
+        _ov_time = _fmt_time(stat_mtime_iso(_ov_latest_proposal))
+
+        _ov_synopsis = _investor_synopsis(_ov_payload)
+
+        left, right = st.columns([1.4, 1], gap="large")
+        with left:
+            st.markdown(
+                f"""
+                <div class="glass-card">
+                    <div class="card-title-row">
+                        <div class="title">{_html.escape(_ov_summary) if _ov_summary else 'Latest proposal'}</div>
+                        <div class="meta">{_html.escape(_ov_time)}</div>
+                    </div>
+                    <div class="glass-meta">ID: {_html.escape(_ov_id)} · Mode: {_html.escape(_ov_mode)}</div>
+                    <div class="subtle" style="margin-top:8px; white-space:pre-wrap;">{_html.escape(_ov_context or '—')}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.markdown("**Investor-style synopsis**")
+            st.markdown(
+                "\n".join(
+                    [
+                        f"- **What it is:** {_ov_synopsis.get('what') or '—'}",
+                        f"- **Why now:** {_ov_synopsis.get('why') or '—'}",
+                        f"- **Edge:** {_ov_synopsis.get('edge') or '—'}",
+                        f"- **Next step:** {_ov_synopsis.get('next') or '—'}",
+                        f"- **Tech notes:** {_ov_synopsis.get('tech') or '—'}",
+                    ]
+                )
+            )
+            if _ov_decision:
+                st.caption(f"Decision: {_ov_decision.get('decision','—')} · {_ov_decision.get('timestamp','—')}")
+        with right:
+            _note = st.text_input(
+                "Decision note (optional)",
+                key=f"ov_note_{_ov_latest_proposal.name}",
+                placeholder="Why approve or reject?",
+            )
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("Approve", key=f"ov_approve_{_ov_latest_proposal.name}"):
+                    priority_path = write_priority_from_proposal(_ov_latest_proposal, _ov_payload, _note)
+                    write_decision(
+                        _ov_latest_proposal,
+                        "APPROVE",
+                        note=_note,
+                        extra={"priority_path": str(priority_path)},
+                    )
+                    st.success(f"Approved. Draft priority saved to {priority_path}.")
+                    st.rerun()
+            with c2:
+                if st.button("Reject", key=f"ov_reject_{_ov_latest_proposal.name}"):
+                    write_decision(_ov_latest_proposal, "REJECT", note=_note)
+                    st.warning("Rejected. Decision recorded.")
+                    st.rerun()
+
+            if _ov_decision and _ov_decision.get("priority_path"):
+                if st.button("Promote to active", key=f"ov_promote_{_ov_latest_proposal.name}"):
+                    promoted = promote_priority(Path(_ov_decision["priority_path"]))
+                    trigger_run()
+                    st.success(f"Promoted to active priority: {promoted}")
+                    st.rerun()
 
     # Two-column: Activity feed + Failures
     _ov_left, _ov_right = st.columns([1.2, 1], gap="large")
@@ -1699,6 +1980,23 @@ with tabs[0]:
             unsafe_allow_html=True,
         )
     else:
+        all_outputs = list_matching(output_patterns())
+
+        def _latest_related_proposal(project_name: str) -> Path | None:
+            hits: list[Path] = []
+            needle = project_name.lower()
+            for p in all_outputs:
+                if p.name.startswith("review_"):
+                    continue
+                try:
+                    data = read_json_file(p)
+                except Exception:
+                    data = {}
+                text = f"{p.name} {data.get('proposal_id','')} {data.get('summary','')} {data.get('context','')}".lower()
+                if needle in text:
+                    hits.append(p)
+            return _latest_file(hits) if hits else None
+
         def _thumb_data(p: Path) -> str | None:
             candidates = [
                 p / "thumbnail.png",
@@ -1719,6 +2017,8 @@ with tabs[0]:
             last_mod = _fmt_mtime(p)
             thumb = _thumb_data(p)
             preview = _preview_url(p)
+            latest_prop = _latest_related_proposal(p.name)
+            latest_prop_label = latest_prop.name if latest_prop else "—"
             thumb_html = f'<img src="{thumb}" style="width:100%;border-radius:10px;margin:8px 0 10px;" />' if thumb else ""
             preview_html = f'<a href="{preview}" target="_blank" style="color:var(--accent);text-decoration:none;">Open Preview →</a>' if preview else ""
             cards.append(
@@ -1727,6 +2027,7 @@ with tabs[0]:
                     <div class="glass-title">{p.name}</div>
                     <div class="glass-meta">Status: {status}</div>
                     <div class="glass-meta">Updated: {_fmt_time(ts) if ts else last_mod}</div>
+                    <div class="glass-meta">Latest proposal: {latest_prop_label}</div>
                     {thumb_html}
                     {preview_html}
                 </div>
@@ -1928,46 +2229,49 @@ with tabs[2]:
     _inbox_lines = [l for l in _inbox_raw.splitlines() if l.strip()]
     _inbox_count = len(_inbox_lines)
     _inbox_chars = len(_inbox_raw)
-    _inbox_has_urgent = any(
-        kw in _inbox_raw.lower()
-        for kw in ("urgent", "critical", "blocker", "asap", "!!!")
-    )
-
-    # Toolbar with stats
-    _urgent_badge = (
-        '<span class="inbox-stat" style="border-color:rgba(255,68,68,0.4);"><strong style="color:var(--danger);">⚠ Urgent items detected</strong></span>'
-        if _inbox_has_urgent else ""
-    )
-    st.markdown(
-        f"""
-        <div class="inbox-toolbar">
-            <span class="inbox-stat"><strong>{_inbox_count}</strong> directives</span>
-            <span class="inbox-stat"><strong>{_inbox_chars:,}</strong> chars</span>
-            {_urgent_badge}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    _inbox_has_urgent = any(_inbox_is_urgent(l) for l in _inbox_lines)
 
     # Two-column layout: editor + preview/help
     _inbox_edit_col, _inbox_side_col = st.columns([2, 1], gap="large")
 
     with _inbox_edit_col:
+        st.markdown(
+            f"""
+            <div class="inbox-shell">
+              <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between;">
+                <div style="display:flex; flex-wrap:wrap; gap:10px;">
+                  <span class="pill"><strong>{_inbox_count}</strong>&nbsp;directives</span>
+                  <span class="pill"><strong>{_inbox_chars:,}</strong>&nbsp;chars</span>
+                  {f'<span class="pill urgent"><strong>⚠ Urgent</strong>&nbsp;items detected</span>' if _inbox_has_urgent else '<span class="pill"><strong>OK</strong>&nbsp;no urgent markers</span>'}
+                </div>
+                <div class="hint">One directive per line. Saved directives are read before each cycle.</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown('<div style="height:10px;"></div>', unsafe_allow_html=True)
+
         inbox = st.text_area(
-            "Edit directives",
+            "Inbox directives",
             value=_inbox_raw,
-            height=420,
+            height=460,
             key="inbox_editor",
-            help="One directive per line. The agent reads this before each cycle.",
+            placeholder="Example:\nURGENT: Fix failing health probe on /health endpoint\nImprove Outputs page filtering by project\nAdd clearer call-to-action on Overview",
             label_visibility="collapsed",
         )
-        _inbox_btn_cols = st.columns([1, 1, 3])
+        _inbox_btn_cols = st.columns([1, 1, 2.2], gap="small")
         with _inbox_btn_cols[0]:
-            if st.button("💾 Save", key="save_inbox", use_container_width=True):
+            if st.button("💾 Save directives", key="save_inbox", use_container_width=True):
                 write_inbox(inbox)
-                st.success("Inbox saved ✓")
+                st.success("Saved. Next cycle will use these directives.")
         with _inbox_btn_cols[1]:
-            if st.button("🔄 Reload", key="reload_inbox", use_container_width=True):
+            if st.button("↩ Reload from disk", key="reload_inbox", use_container_width=True):
+                st.rerun()
+        with _inbox_btn_cols[2]:
+            if st.button("🧹 Clean up whitespace", key="cleanup_inbox", use_container_width=True):
+                cleaned = "\n".join([ln.rstrip() for ln in inbox.splitlines()]).strip() + ("\n" if inbox.strip() else "")
+                st.session_state["inbox_editor"] = cleaned
                 st.rerun()
 
     with _inbox_side_col:
@@ -1977,40 +2281,42 @@ with tabs[2]:
             _preview_html_items = []
             for _pl in _preview_lines[:20]:
                 _pl_escaped = _html.escape(_pl.strip())
-                _is_urgent = any(kw in _pl.lower() for kw in ("urgent", "critical", "blocker", "asap", "!!!"))
-                _dot_color = "var(--danger)" if _is_urgent else "var(--accent)"
+                _is_urgent = _inbox_is_urgent(_pl)
                 _preview_html_items.append(
-                    f'<div style="display:flex;align-items:flex-start;gap:8px;padding:4px 0;font-size:0.8rem;">'
-                    f'<span style="color:{_dot_color};flex-shrink:0;margin-top:2px;">●</span>'
-                    f'<span style="color:var(--text);line-height:1.4;">{_pl_escaped}</span>'
+                    f'<div class="inbox-line">'
+                    f'  <span class="inbox-dot {"urgent" if _is_urgent else ""}"></span>'
+                    f'  <span class="inbox-text">{_pl_escaped}</span>'
                     f'</div>'
                 )
             st.markdown(
-                f'<div style="border:1px solid var(--accent-border);border-radius:10px;padding:10px 12px;'
-                f'background:rgba(7,12,7,0.4);max-height:380px;overflow-y:auto;">'
-                f'{"".join(_preview_html_items)}'
-                f'</div>',
+                f'<div class="inbox-preview">{"".join(_preview_html_items)}</div>',
                 unsafe_allow_html=True,
             )
             if len(_preview_lines) > 20:
                 st.caption(f"…and {len(_preview_lines) - 20} more directives")
         else:
             st.markdown(
-                '<div class="empty-state" style="padding:20px 10px;">'
-                '<div class="empty-icon">📥</div>'
-                '<div class="empty-text">Inbox is empty. Add directives to guide the agent.</div>'
-                '</div>',
+                '<div class="inbox-preview"><div class="inbox-empty">Inbox is empty. Add directives to guide the agent.</div></div>',
                 unsafe_allow_html=True,
             )
 
-        st.markdown('<div class="section-header" style="font-size:0.85rem;">💡 Tips</div>', unsafe_allow_html=True)
+        st.markdown('<div style="height:12px;"></div>', unsafe_allow_html=True)
         st.markdown(
-            '<div style="font-size:0.78rem; color:var(--muted); line-height:1.6;">'
-            '• One directive per line<br>'
-            '• Use <code>URGENT:</code> prefix for high-priority items<br>'
-            '• Be specific: "improve health tab chart colors" > "fix stuff"<br>'
-            '• The agent reads this before every cycle'
-            '</div>',
+            """
+            <div class="inbox-help-card">
+              <h4>💡 Writing good directives</h4>
+              <div class="subtle">
+                <div style="margin-bottom:8px;">
+                  Keep each line atomic and testable. Prefer outcomes over vague intent.
+                </div>
+                <div class="kv-grid" style="margin:0;">
+                  <span class="kv-key">Use</span><span class="kv-val">"Add a Health probe summary card"</span>
+                  <span class="kv-key">Avoid</span><span class="kv-val warn">"Fix health tab"</span>
+                  <span class="kv-key">Urgent marker</span><span class="kv-val error">URGENT: ...</span>
+                </div>
+              </div>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
 
@@ -2175,14 +2481,20 @@ with tabs[3]:
                     decision = read_decision(p)
                     is_proposal = not p.name.startswith("review_")
 
-                    def _as_list(value) -> list[str]:
-                        if isinstance(value, list):
-                            return [str(v) for v in value]
-                        if value:
-                            return [str(value)]
-                        return []
-
                     if is_proposal and isinstance(payload, dict):
+                        synopsis = _investor_synopsis(payload)
+                        st.markdown("**Investor-style synopsis**")
+                        st.markdown(
+                            "\n".join(
+                                [
+                                    f"- **What it is:** {synopsis.get('what') or '—'}",
+                                    f"- **Why now:** {synopsis.get('why') or '—'}",
+                                    f"- **Edge:** {synopsis.get('edge') or '—'}",
+                                    f"- **Next step:** {synopsis.get('next') or '—'}",
+                                    f"- **Tech notes:** {synopsis.get('tech') or '—'}",
+                                ]
+                            )
+                        )
                         st.markdown("**Proposal snapshot**")
                         st.write(payload.get("summary") or "—")
                         st.caption(payload.get("context") or "")
@@ -2772,6 +3084,23 @@ with tabs[8]:
     else:
         st.success(f"OpenClaw ready — default model: {_default_model}")
         st.caption(f"Models in config: {', '.join(_models[:5])}")
+
+    # ── Endpoint health probes ───────────────────────────────────
+    st.divider()
+    st.markdown("**Endpoint health probes**")
+    endpoints = [
+        ("OpenClaw gateway", "http://127.0.0.1:18789/health", False),
+        ("Local Llama /health", "http://127.0.0.1:11434/health", True),
+        ("Local Llama models", "http://127.0.0.1:11434/v1/models", False),
+    ]
+    for label, url, expect_json in endpoints:
+        status, note = _http_probe(url, expect_json_status=expect_json, timeout=2)
+        if status == "ok":
+            st.success(f"{label}: {note}")
+        elif status == "warn":
+            st.warning(f"{label}: {note}")
+        else:
+            st.error(f"{label}: {note}")
 
     if st.button("Refresh health", key="health_refresh"):
         st.rerun()

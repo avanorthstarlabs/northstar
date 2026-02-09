@@ -1,8 +1,9 @@
 # DONE
 
 ## Checklist
+- [x] No TODO/WIP/PLACEHOLDER markers in app.py — clean
 - [x] Tabs: Overview/Inbox/Outputs/Timeline/Settings — found labels
-- [x] Brief me button uses Ollama — contains 'Brief me' and 'ollama'
+- [x] Brief me button uses OpenClaw — contains 'Brief me' and 'openclaw'
 - [x] Outputs page with search and summary cards — outputs + search + columns present
 - [x] Timeline counts per day/week/month — bucket functions present
 
@@ -17,6 +18,6 @@ python -c "import streamlit, app"
 - None noted by the automated checks.
 
 ## Metadata
-- Timestamp: 2026-02-08T00:15:08.432841+00:00
+- Timestamp: 2026-02-09T04:58:27.076689+00:00
 - Python: 3.12.3
 - AUTOPATCH_MODEL: qwen2.5-coder:7b
