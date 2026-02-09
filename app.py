@@ -59,6 +59,8 @@ st.markdown(
     }
     h1, h2, h3, h4 { color: var(--text); }
     .stMarkdown, .stCaption, .stText, .stTextArea textarea { color: var(--text); }
+    /* Reduce extra top whitespace */
+    .block-container { padding-top: 1.25rem; }
     .stButton>button {
         background: transparent;
         border: 1px solid var(--accent);
@@ -101,6 +103,106 @@ st.markdown(
         margin-right:8px;background:var(--accent);
         box-shadow:0 0 12px rgba(57,255,20,0.6);
         animation:pulse 1.6s ease-in-out infinite;
+    }
+    /* ── Header: unified control-center top bar ───────────────── */
+    .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 80;
+        margin: -0.25rem 0 12px;
+        padding: 12px 14px;
+        border-radius: 14px;
+        background: rgba(7, 12, 7, 0.55);
+        border: 1px solid var(--accent-border);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+    }
+    .topbar-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        justify-content: space-between;
+        flex-wrap: wrap;
+    }
+    .topbar-left {
+        display:flex;
+        align-items:center;
+        gap: 12px;
+        min-width: 260px;
+        flex: 1;
+    }
+    .topbar-title {
+        display:flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+    }
+    .topbar-title .h {
+        margin: 0;
+        padding: 0;
+        font-size: 1.45rem;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        color: var(--text);
+        line-height: 1.1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .topbar-title .sub {
+        font-size: 0.72rem;
+        color: var(--muted);
+        opacity: 0.7;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+    .topbar-meta {
+        display:flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+    .meta-chip {
+        display:inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--accent-border);
+        background: rgba(7, 12, 7, 0.40);
+        color: var(--muted);
+        font-size: 0.75rem;
+        white-space: nowrap;
+    }
+    .meta-chip strong { color: var(--text); font-weight: 700; }
+    .meta-chip .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--muted);
+        opacity: 0.7;
+        box-shadow: none;
+        flex-shrink: 0;
+    }
+    .meta-chip.ok .dot { background: var(--accent); opacity: 1; box-shadow: 0 0 10px rgba(57,255,20,0.35); }
+    .meta-chip.warn .dot { background: var(--warn); opacity: 1; box-shadow: 0 0 10px rgba(255,170,0,0.25); }
+    .meta-chip.error .dot { background: var(--danger); opacity: 1; box-shadow: 0 0 10px rgba(255,68,68,0.25); }
+    .meta-chip.neutral .dot { background: var(--muted); opacity: 0.7; box-shadow:none; }
+    .topbar-actions {
+        display:flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    .topbar-actions .stButton>button {
+        padding: 6px 10px;
+        border-radius: 10px;
+        font-size: 0.82rem;
+        min-height: 36px;
+    }
+    .topbar-actions .stButton>button:hover {
+        transform: translateY(-1px);
     }
     /* Compact data strip */
     .data-strip{
@@ -785,6 +887,24 @@ def _page_context(title: str, description: str = "", extra_html: str = "") -> No
         f'</div>',
         unsafe_allow_html=True,
     )
+
+def _variant_from_health(health: str) -> str:
+    if health == "ok":
+        return "ok"
+    if health in ("warn", "unknown"):
+        return "warn"
+    if health == "error":
+        return "error"
+    return "neutral"
+
+def _variant_from_project_status(status: str) -> str:
+    if status == "IN_PROGRESS":
+        return "ok"
+    if status == "PENDING_HUMAN_REVIEW":
+        return "warn"
+    if status == "DONE":
+        return "ok"
+    return "neutral"
 
 
 def _latest_file(files: Iterable[Path]) -> Path | None:
@@ -1600,38 +1720,82 @@ def _http_probe(url: str, expect_json_status: bool = False, timeout: int = 2) ->
         return "error", f"{type(e).__name__}: {e}"
 
 # ── Header (rendered after helpers are defined) ──────────────────
-cols_title = st.columns([1, 8])
-with cols_title[0]:
-    if LOGO_PATH.exists():
-        st.image(str(LOGO_PATH), width=72)
-with cols_title[1]:
-    # Compute uptime string for header
-    _hdr_last_cycle = _last_cycle_ts()
-    _hdr_uptime = ""
-    if _hdr_last_cycle:
-        _hdr_age_min = (datetime.now(timezone.utc) - _hdr_last_cycle).total_seconds() / 60.0
-        _hdr_uptime = f"{_hdr_age_min:.0f}m ago" if _hdr_age_min < 60 else f"{_hdr_age_min/60:.1f}h ago"
-    _hdr_health, _ = _read_cycle_health()
-    _hdr_health_color = "var(--accent)" if _hdr_health == "ok" else ("var(--warn)" if _hdr_health in ("warn", "unknown") else "var(--danger)")
-    st.markdown(
-        f"""
-        <div style="display:flex; align-items:center; gap:14px; margin-bottom:4px;">
-            <h1 style="margin:0; padding:0; font-size:1.8rem; letter-spacing:-0.02em;">
-                Agent Runtime Dashboard
-            </h1>
-            <span class="pulse" style="margin-top:4px;"></span>
-        </div>
-        <div style="font-size:0.78rem; color:var(--muted); margin-top:-2px; letter-spacing:0.04em;">
-            AUTONOMOUS ENGINEERING CONTROL CENTER
-            <span style="margin-left:16px; color:{_hdr_health_color}; font-weight:600;">● {_hdr_health.upper()}</span>
-            {f'<span style="margin-left:8px; opacity:0.7;">Last cycle: {_hdr_uptime}</span>' if _hdr_uptime else ''}
-        </div>
-        <div style="font-size:0.68rem; color:var(--muted); margin-top:2px; opacity:0.5;">
-            {datetime.now(PST).strftime("%A, %B %d · %H:%M PST")}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+# Cohesive sticky topbar with quick actions + at-a-glance chips
+_hdr_last_cycle = _last_cycle_ts()
+_hdr_uptime = ""
+if _hdr_last_cycle:
+    _hdr_age_min = (datetime.now(timezone.utc) - _hdr_last_cycle).total_seconds() / 60.0
+    _hdr_uptime = f"{_hdr_age_min:.0f}m ago" if _hdr_age_min < 60 else f"{_hdr_age_min/60:.1f}h ago"
+_hdr_health, _hdr_health_reason = _read_cycle_health()
+_hdr_ps, _hdr_ps_ts = _read_project_status()
+_hdr_health_label, _hdr_health_note = _cycle_label(_hdr_health, _hdr_ps)
+_hdr_provider, _hdr_model = _active_provider_model()
+_hdr_health_variant = _variant_from_health(_hdr_health_label)
+_hdr_project_variant = _variant_from_project_status(_hdr_ps)
+
+_hdr_inbox_raw = read_inbox()
+_hdr_inbox_count = len([l for l in _hdr_inbox_raw.splitlines() if l.strip()])
+
+_logo_uri = ""
+if LOGO_PATH.exists():
+    try:
+        _logo_b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode("ascii")
+        _logo_uri = f"data:image/svg+xml;base64,{_logo_b64}"
+    except Exception:
+        _logo_uri = ""
+
+_logo_html = (
+    f'<img src="{_logo_uri}" style="width:44px;height:44px;object-fit:contain; border-radius:10px; '
+    f'border:1px solid var(--accent-border); background: rgba(7,12,7,0.35); padding:6px;" />'
+    if _logo_uri
+    else '<div style="width:44px;height:44px;border-radius:10px;border:1px solid var(--accent-border);'
+         'background: rgba(7,12,7,0.35);"></div>'
+)
+
+_topbar = st.container()
+with _topbar:
+    c_left, c_actions = st.columns([3.2, 1.2], vertical_alignment="center")
+    with c_left:
+        st.markdown(
+            f"""
+            <div class="topbar">
+              <div class="topbar-row">
+                <div class="topbar-left">
+                  {_logo_html}
+                  <div class="topbar-title">
+                    <div class="h">Agent Runtime Dashboard</div>
+                    <div class="sub">Autonomous Engineering Control Center</div>
+                  </div>
+                </div>
+                <div class="topbar-meta">
+                  <span class="meta-chip {_hdr_health_variant}"><span class="dot"></span><strong>Cycle</strong> {_hdr_health_label.upper()}</span>
+                  <span class="meta-chip {_hdr_project_variant}"><span class="dot"></span><strong>Project</strong> {_html.escape(_hdr_ps)}</span>
+                  <span class="meta-chip neutral"><span class="dot"></span><strong>Provider</strong> {_hdr_provider.upper() if _hdr_provider else "—"}</span>
+                  <span class="meta-chip neutral"><span class="dot"></span><strong>Inbox</strong> {_hdr_inbox_count}</span>
+                  <span class="meta-chip neutral"><span class="dot"></span><strong>Last</strong> {_hdr_uptime or "—"}</span>
+                  <span class="meta-chip neutral"><span class="dot"></span><strong>Now</strong> {datetime.now(PST).strftime("%a %b %d · %H:%M PST")}</span>
+                </div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with c_actions:
+        st.markdown('<div class="topbar-actions">', unsafe_allow_html=True)
+        a1, a2, a3 = st.columns(3, gap="small")
+        with a1:
+            if st.button("Refresh", key="top_refresh", use_container_width=True, help="Reload the dashboard UI"):
+                st.rerun()
+        with a2:
+            if st.button("Brief", key="top_brief", use_container_width=True, help="Jump to Overview → Brief Me"):
+                st.session_state["_jump_to_brief"] = True
+                st.rerun()
+        with a3:
+            if st.button("Kick", key="top_kick", use_container_width=True, help="Trigger the next agent cycle"):
+                _touch_trigger("topbar_kick")
+                st.success("Cycle triggered.")
+                st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
 
 # Small spacer before tabs
 st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
