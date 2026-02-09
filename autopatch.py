@@ -76,8 +76,11 @@ def detect_linter() -> list[str] | None:
 def ensure_git():
     if not (DASH / ".git").exists():
         sh(["git", "init"], cwd=DASH)
-        sh(["git", "add", "-A"], cwd=DASH)
-        sh(["git", "commit", "-m", "init"], cwd=DASH)
+    # Ensure local identity so commits never fail due to missing config
+    sh(["git", "config", "user.email", "agent-runtime@local"], cwd=DASH)
+    sh(["git", "config", "user.name", "Agent Runtime"], cwd=DASH)
+    sh(["git", "add", "-A"], cwd=DASH)
+    sh(["git", "commit", "-m", "init"], cwd=DASH)
 
 def read_latest_outputs(n=6) -> str:
     if not PROPOSALS.exists():
@@ -112,6 +115,18 @@ def extract_fulltext(text: str) -> str:
     end = text.find("END_APP_PY")
     if start != -1 and end != -1 and end > start:
         return text[start + len("BEGIN_APP_PY"):end].strip("\n")
+    # Fallback: treat plain app.py content as fulltext if it looks like the file
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.replace("```python", "").replace("```", "").strip()
+    if (
+        "import streamlit as st" in cleaned
+        and "st.set_page_config" in cleaned
+        and "def " in cleaned
+        and "st." in cleaned
+        and len(cleaned) > 2000
+    ):
+        return cleaned
     return ""
 
 

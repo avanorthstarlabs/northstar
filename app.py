@@ -21,7 +21,8 @@ from lib.runtime import (
     read_decision,
     write_decision,
     write_priority_from_proposal,
-    promote_priority
+    promote_priority,
+    approval_gate_enabled
 )
 import streamlit.components.v1 as components
 import html as _html
@@ -1192,12 +1193,28 @@ def _confirm_continue():
             json.dumps({"status": "IN_PROGRESS", "timestamp": datetime.now(timezone.utc).isoformat(), "reason": "needs more work"}, indent=2),
             encoding="utf-8",
         )
+        _write_continue_work_override("agent-dashboard", Path("/home/hackerman/agent-runtime/workspace/projects/agent-dashboard"))
         _touch_trigger("continue_work")
         st.warning("Set to IN_PROGRESS")
         st.rerun()
     if c2.button("Cancel"):
         st.info("Cancelled")
         st.rerun()
+
+def _write_continue_work_override(project: str, project_path: Path) -> Path:
+    overrides_dir = Path("/home/hackerman/agent-runtime/directives/overrides")
+    overrides_dir.mkdir(parents=True, exist_ok=True)
+    override_path = overrides_dir / f"continue_work_{project}.md"
+    override_path.write_text(
+        "# Continue Work\n"
+        f"Project: {project}\n"
+        f"Path: {project_path}\n\n"
+        "Generate a new improvement proposal based on the latest project state. "
+        "Study WORK_ORDER.md and current code, identify gaps vs the existing Definition of Done, "
+        "and propose the next iteration with clear steps and updated Definition of Done.\n",
+        encoding="utf-8",
+    )
+    return override_path
 
 def _recent_failures(limit: int = 3) -> list[str]:
     log_path = Path("/home/hackerman/agent-runtime/logs/dashboard_cycle.jsonl")
@@ -1683,6 +1700,7 @@ with tabs[0]:
             {_chip('Cycle: ' + _ov_health_label.upper(), _ov_health_variant)}
             {_chip('Project: ' + _ov_ps, _ov_status_variant)}
             {_chip('Credits: ' + _ov_credit_status.upper(), _ov_credit_variant)}
+            {_chip('Approval Gate: ' + ('ON' if approval_gate_enabled() else 'OFF'), 'ok' if approval_gate_enabled() else 'neutral')}
         </div>
         <div style="font-size:0.78rem; color:var(--muted); line-height:1.6; margin-bottom:12px;">
             🔧 {_ov_reason} · Patch: <code>{_latest_patch_name()}</code> · Model: <code>{_ov_model}</code>
@@ -1707,6 +1725,11 @@ with tabs[0]:
         _ov_decision = read_decision(_ov_latest_proposal)
         _ov_summary = str(_ov_payload.get("summary") or "").strip()
         _ov_context = str(_ov_payload.get("context") or "").strip()
+        _ov_overview = _ov_payload.get("overview")
+        _ov_proj_summary = _ov_payload.get("project_summary")
+        _ov_tech = _ov_payload.get("tech_details")
+        _ov_done = _ov_payload.get("definition_of_done")
+        _ov_project = str(_ov_payload.get("project") or "").strip()
         _ov_id = str(_ov_payload.get("proposal_id") or _ov_latest_proposal.stem)
         _ov_mode = str(_ov_payload.get("mode") or "—")
         _ov_time = _fmt_time(stat_mtime_iso(_ov_latest_proposal))
@@ -1722,8 +1745,8 @@ with tabs[0]:
                         <div class="title">{_html.escape(_ov_summary) if _ov_summary else 'Latest proposal'}</div>
                         <div class="meta">{_html.escape(_ov_time)}</div>
                     </div>
-                    <div class="glass-meta">ID: {_html.escape(_ov_id)} · Mode: {_html.escape(_ov_mode)}</div>
-                    <div class="subtle" style="margin-top:8px; white-space:pre-wrap;">{_html.escape(_ov_context or '—')}</div>
+                    <div class="glass-meta">ID: {_html.escape(_ov_id)} · Mode: {_html.escape(_ov_mode)} · Project: {_html.escape(_ov_project or '—')}</div>
+                    <div class="subtle" style="margin-top:8px; white-space:pre-wrap;">{_html.escape(str(_ov_overview or _ov_context or '—'))}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -1740,9 +1763,20 @@ with tabs[0]:
                     ]
                 )
             )
+            st.markdown("**Project summary**")
+            st.caption(str(_ov_proj_summary or "—"))
+            st.markdown("**Tech details**")
+            st.caption(str(_ov_tech or "—"))
+            st.markdown("**Definition of Done**")
+            _ov_done_list = _as_list(_ov_done)
+            if _ov_done_list:
+                st.markdown("\n".join([f"- {item}" for item in _ov_done_list]))
+            else:
+                st.caption("—")
             if _ov_decision:
                 st.caption(f"Decision: {_ov_decision.get('decision','—')} · {_ov_decision.get('timestamp','—')}")
         with right:
+            _gate_on = approval_gate_enabled()
             _note = st.text_input(
                 "Decision note (optional)",
                 key=f"ov_note_{_ov_latest_proposal.name}",
@@ -1758,7 +1792,11 @@ with tabs[0]:
                         note=_note,
                         extra={"priority_path": str(priority_path)},
                     )
-                    st.success(f"Approved. Draft priority saved to {priority_path}.")
+                    if _gate_on:
+                        trigger_run()
+                        st.success(f"Approved and queued. Priority saved to {priority_path}.")
+                    else:
+                        st.success(f"Approved. Draft priority saved to {priority_path}.")
                     st.rerun()
             with c2:
                 if st.button("Reject", key=f"ov_reject_{_ov_latest_proposal.name}"):
@@ -1766,7 +1804,7 @@ with tabs[0]:
                     st.warning("Rejected. Decision recorded.")
                     st.rerun()
 
-            if _ov_decision and _ov_decision.get("priority_path"):
+            if (not _gate_on) and _ov_decision and _ov_decision.get("priority_path"):
                 if st.button("Promote to active", key=f"ov_promote_{_ov_latest_proposal.name}"):
                     promoted = promote_priority(Path(_ov_decision["priority_path"]))
                     trigger_run()
@@ -2208,6 +2246,28 @@ with tabs[1]:
                             st.code("\n".join(changes), language="text")
                         else:
                             st.caption("No changelog entries yet.")
+                    if status in ("PENDING_HUMAN_REVIEW", "DONE"):
+                        st.markdown("**Review actions**")
+                        action_cols = st.columns(2)
+                        with action_cols[0]:
+                            if status == "PENDING_HUMAN_REVIEW":
+                                if st.button("Approve DONE", key=f"proj_done_{p.name}"):
+                                    (p / "status.json").write_text(
+                                        json.dumps({"status": "DONE", "timestamp": datetime.now(timezone.utc).isoformat(), "reason": "approved_done"}, indent=2),
+                                        encoding="utf-8",
+                                    )
+                                    st.success("Marked DONE")
+                                    st.rerun()
+                        with action_cols[1]:
+                            if st.button("Continue work", key=f"proj_continue_{p.name}"):
+                                (p / "status.json").write_text(
+                                    json.dumps({"status": "IN_PROGRESS", "timestamp": datetime.now(timezone.utc).isoformat(), "reason": "continue_work"}, indent=2),
+                                    encoding="utf-8",
+                                )
+                                _write_continue_work_override(p.name, p)
+                                _touch_trigger(f"continue_work:{p.name}")
+                                st.warning("Set to IN_PROGRESS and queued a new proposal")
+                                st.rerun()
 
         # Global recent updates feed
         st.divider()
@@ -2497,7 +2557,27 @@ with tabs[3]:
                         )
                         st.markdown("**Proposal snapshot**")
                         st.write(payload.get("summary") or "—")
-                        st.caption(payload.get("context") or "")
+                        if payload.get("project"):
+                            st.caption(f"Project: {payload.get('project')}")
+                        if payload.get("overview"):
+                            st.markdown("**Overview**")
+                            st.caption(payload.get("overview") or "—")
+                        if payload.get("project_summary"):
+                            st.markdown("**Project summary**")
+                            st.caption(payload.get("project_summary") or "—")
+                        if payload.get("tech_details"):
+                            st.markdown("**Tech details**")
+                            st.caption(payload.get("tech_details") or "—")
+                        if payload.get("definition_of_done"):
+                            st.markdown("**Definition of Done**")
+                            done_items = _as_list(payload.get("definition_of_done"))
+                            if done_items:
+                                st.markdown("\n".join([f"- {item}" for item in done_items]))
+                            else:
+                                st.caption("—")
+                        if payload.get("context"):
+                            st.markdown("**Context**")
+                            st.caption(payload.get("context") or "—")
                         actions = _as_list(payload.get("suggested_actions"))
                         success = _as_list(payload.get("success_criteria"))
                         if actions:
@@ -2522,6 +2602,7 @@ with tabs[3]:
 
                     if is_proposal and isinstance(payload, dict):
                         st.markdown("**Approval controls**")
+                        _gate_on = approval_gate_enabled()
                         note = st.text_input(
                             "Decision note (optional)",
                             key=f"decision_note_{p.name}",
@@ -2537,7 +2618,11 @@ with tabs[3]:
                                     note=note,
                                     extra={"priority_path": str(priority_path)},
                                 )
-                                st.success(f"Approved. Draft priority saved to {priority_path}.")
+                                if _gate_on:
+                                    trigger_run()
+                                    st.success(f"Approved and queued. Priority saved to {priority_path}.")
+                                else:
+                                    st.success(f"Approved. Draft priority saved to {priority_path}.")
                                 st.rerun()
                         with btn_cols[1]:
                             if st.button("Reject proposal", key=f"reject_{p.name}"):
@@ -2545,7 +2630,7 @@ with tabs[3]:
                                 st.warning("Rejected. Decision recorded.")
                                 st.rerun()
                         with btn_cols[2]:
-                            if decision and decision.get("priority_path"):
+                            if (not _gate_on) and decision and decision.get("priority_path"):
                                 if st.button("Promote to active", key=f"promote_{p.name}"):
                                     promoted = promote_priority(Path(decision["priority_path"]))
                                     trigger_run()

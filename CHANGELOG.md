@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-02-09T07:41:32Z
+- Added proposal approval gate support + project slug in approved priorities.
+- Dashboard now shows overview/summary/tech details/definition of done in proposals.
+- Added per-project review actions and continue-work override prompts.
+
 ## 2026-02-07T15:51:19.407923+00:00
 - Applied patch: dashboard_patch_2026-02-07T15-51-18.609474+00-00.diff
 
@@ -165,4 +170,3 @@
 
 ## 2026-02-09T07:14:17.854871+00:00
 - Applied patch: dashboard_patch_2026-02-09T07-14-15.915069+00-00.diff
-

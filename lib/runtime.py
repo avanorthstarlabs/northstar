@@ -12,6 +12,7 @@ PROPOSALS_DIR = RUNTIME / "planner" / "proposals"
 DECISIONS_DIR = RUNTIME / "planner" / "decisions"
 PRIORITIES_DIR = RUNTIME / "directives" / "priorities"
 APPROVED_DIR = PRIORITIES_DIR / "approved"
+ROUTER_ENV = RUNTIME / "planner" / "router.env"
 
 # Centralized proposal/review file patterns (keep in sync with UI expectations)
 PROPOSAL_PATTERNS = [
@@ -94,6 +95,22 @@ def write_decision(proposal_path: Path, decision: str, note: str = "", source: s
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
     return path
 
+def read_router_env() -> dict:
+    cfg = {}
+    if not ROUTER_ENV.exists():
+        return cfg
+    for line in ROUTER_ENV.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        cfg[k.strip()] = v.strip()
+    return cfg
+
+def approval_gate_enabled() -> bool:
+    val = read_router_env().get("APPROVAL_GATE", "0")
+    return str(val).strip().lower() in ("1", "true", "yes", "on")
+
 def write_priority_from_proposal(proposal_path: Path, proposal_obj: dict, note: str = "") -> Path:
     _ensure_parent(APPROVED_DIR / "placeholder")
     proposal_id = str(proposal_obj.get("proposal_id") or proposal_path.stem)
@@ -101,10 +118,16 @@ def write_priority_from_proposal(proposal_path: Path, proposal_obj: dict, note: 
     out = APPROVED_DIR / f"approved_{slug}.md"
 
     summary = str(proposal_obj.get("summary") or "").strip()
+    overview = proposal_obj.get("overview")
+    project_summary = proposal_obj.get("project_summary")
+    tech_details = proposal_obj.get("tech_details")
+    definition_of_done = proposal_obj.get("definition_of_done")
     context = str(proposal_obj.get("context") or "").strip()
     reasoning = str(proposal_obj.get("reasoning") or "").strip()
+    project = str(proposal_obj.get("project") or "").strip()
     mode = str(proposal_obj.get("mode") or "").strip()
     confidence = proposal_obj.get("confidence")
+    source_priority = str(proposal_obj.get("source_priority_path") or "").strip()
     suggested = proposal_obj.get("suggested_actions") or []
     success = proposal_obj.get("success_criteria") or []
 
@@ -113,8 +136,18 @@ def write_priority_from_proposal(proposal_path: Path, proposal_obj: dict, note: 
     if not isinstance(success, list):
         success = [str(success)]
 
+    header_project = project or "agent-dashboard"
+    def _format_value(value) -> list[str]:
+        if value is None:
+            return ["—"]
+        if isinstance(value, list):
+            return [f"- {item}" for item in value] if value else ["—"]
+        value = str(value).strip()
+        return [value] if value else ["—"]
+
     lines = [
         f"# Approved Proposal: {summary or proposal_id}",
+        f"project: {header_project}",
         "",
         "## Metadata",
         f"- Proposal ID: {proposal_id}",
@@ -123,9 +156,23 @@ def write_priority_from_proposal(proposal_path: Path, proposal_obj: dict, note: 
         f"- Confidence: {confidence if confidence is not None else '—'}",
         f"- Approved At: {datetime.now(timezone.utc).isoformat()}",
     ]
+    if source_priority:
+        lines += [f"- Source Priority: {source_priority}"]
     if note:
         lines += ["- Approval Note: " + note]
     lines += [
+        "",
+        "## Overview",
+        *_format_value(overview),
+        "",
+        "## Project Summary",
+        *_format_value(project_summary),
+        "",
+        "## Tech Details",
+        *_format_value(tech_details),
+        "",
+        "## Definition of Done",
+        *_format_value(definition_of_done),
         "",
         "## Summary",
         summary or "—",
