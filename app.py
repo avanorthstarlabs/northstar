@@ -11,11 +11,16 @@ from lib.runtime import (
     read_mode, write_mode,
     read_inbox, write_inbox,
     trigger_run,
-    latest_claude, latest_review,
+    latest_proposal_any, latest_review_any,
+    output_patterns,
     read_json_file,
     list_matching,
     stat_mtime_iso,
-    extract_timestamp
+    extract_timestamp,
+    read_decision,
+    write_decision,
+    write_priority_from_proposal,
+    promote_priority
 )
 import streamlit.components.v1 as components
 import html as _html
@@ -28,7 +33,7 @@ ICON_PATH = APP_ROOT / "assets" / "icon.png"
 PST = ZoneInfo("America/Los_Angeles")
 
 page_icon = str(ICON_PATH) if ICON_PATH.exists() else ":)"
-st.set_page_config(page_title="Agent Runtime Dashboard", layout="wide", page_icon=page_icon, initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Agent Runtime Dashboard", layout="wide", page_icon=page_icon, initial_sidebar_state="auto")
 
 # ── Global CSS ───────────────────────────────────────────────────
 st.markdown(
@@ -575,6 +580,116 @@ st.markdown(
         background: var(--accent-soft);
         transform: translateX(2px);
     }
+    section[data-testid="stSidebar"] .sb-link-btn {
+        display: block;
+        width: 100%;
+        text-align: left;
+        font-size: 0.8rem;
+        padding: 6px 12px;
+        border-radius: 8px;
+        color: var(--text);
+        background: rgba(7, 12, 7, 0.4);
+        border: 1px solid var(--accent-border);
+        text-decoration: none;
+        font-weight: 600;
+        transition: all 0.2s ease;
+        box-sizing: border-box;
+    }
+    section[data-testid="stSidebar"] .sb-link-btn:hover {
+        background: var(--accent-soft);
+        border-color: var(--accent);
+        transform: translateX(2px);
+    }
+
+    /* ── Inbox editor polish ──────────────────────────────────── */
+    .inbox-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 0 0 12px;
+        flex-wrap: wrap;
+    }
+    .inbox-toolbar .inbox-stat {
+        font-size: 0.78rem;
+        color: var(--muted);
+        padding: 4px 12px;
+        border: 1px solid var(--accent-border);
+        border-radius: 8px;
+        background: rgba(7, 12, 7, 0.4);
+    }
+    .inbox-toolbar .inbox-stat strong {
+        color: var(--accent);
+        font-weight: 700;
+    }
+
+    /* ── Settings section cards ───────────────────────────────── */
+    .settings-section {
+        padding: 18px 20px;
+        border-radius: 14px;
+        background: var(--panel);
+        border: 1px solid var(--accent-border);
+        backdrop-filter: blur(10px);
+        margin-bottom: 16px;
+    }
+    .settings-section h4 {
+        margin: 0 0 10px;
+        font-size: 0.95rem;
+        color: var(--accent);
+    }
+
+    /* ── Inline key-value rows ────────────────────────────────── */
+    .kv-grid {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 4px 16px;
+        font-size: 0.82rem;
+        margin: 6px 0 10px;
+    }
+    .kv-grid .kv-key {
+        color: var(--muted);
+        white-space: nowrap;
+    }
+    .kv-grid .kv-val {
+        color: var(--text);
+        font-weight: 600;
+    }
+    .kv-grid .kv-val.ok { color: var(--accent); }
+    .kv-grid .kv-val.warn { color: var(--warn); }
+    .kv-grid .kv-val.error { color: var(--danger); }
+
+    /* ── Compact action bar ───────────────────────────────────── */
+    .action-bar {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin: 12px 0;
+    }
+
+    /* ── Toast-style feedback ─────────────────────────────────── */
+    .feedback-toast {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 14px;
+        border-radius: 8px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        animation: fadeInUp 300ms ease;
+    }
+    .feedback-toast.success {
+        background: rgba(57, 255, 20, 0.12);
+        border: 1px solid rgba(57, 255, 20, 0.35);
+        color: var(--accent);
+    }
+    @keyframes fadeInUp {
+        from { opacity: 0; transform: translateY(6px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    section[data-testid="stSidebar"] .sb-link-btn:hover {
+        background: var(--accent-soft);
+        border-color: var(--accent);
+        transform: translateX(2px);
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -823,8 +938,7 @@ def _render_sidebar() -> None:
             _sb_age = (datetime.now(timezone.utc) - _sb_last_cycle).total_seconds() / 60.0
             _sb_cycle_str = f"{_sb_age:.0f}m ago" if _sb_age < 60 else f"{_sb_age/60:.1f}h ago"
 
-        _sb_patterns = ["claude_*.json", "review_claude_*__by_openai.json"]
-        _sb_all_files = list_matching(_sb_patterns)
+        _sb_all_files = list_matching(output_patterns())
         _sb_inbox_raw = read_inbox()
         _sb_inbox_lines = len([l for l in _sb_inbox_raw.splitlines() if l.strip()])
 
@@ -866,6 +980,14 @@ def _render_sidebar() -> None:
         if st.button("💬  Chat", key="sidebar_chat", use_container_width=True):
             st.session_state["_jump_to_chat"] = True
             st.rerun()
+        llama_url = "http://127.0.0.1:11434"
+        if hasattr(st, "link_button"):
+            st.link_button("🦙  Open Llama", llama_url, use_container_width=True)
+        else:
+            st.markdown(
+                f'<a class="sb-link-btn" href="{llama_url}" target="_blank" rel="noopener">🦙  Open Llama</a>',
+                unsafe_allow_html=True,
+            )
         if st.button("📝  Notes", key="sidebar_notes", use_container_width=True):
             st.session_state["_jump_to_notes"] = True
             st.rerun()
@@ -1208,14 +1330,33 @@ def _agent_activity() -> tuple[str, str]:
     if not items:
         return "unknown", "no activity logs found"
     # Pick the most recent timestamp
-    def _ts(obj: dict) -> str:
-        return obj.get("ts", "")
-    items.sort(key=_ts, reverse=True)
+    def _ts_dt(obj: dict) -> datetime | None:
+        ts = obj.get("ts", "")
+        if not ts:
+            return None
+        try:
+            return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except Exception:
+            return None
+
+    items.sort(key=lambda obj: _ts_dt(obj) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
     latest = items[0]
     summary = _summarize_event(latest)
     status = "active"
+
     if latest.get("event") in ("proposal_skipped",) or "no activity" in summary.lower():
         status = "idle"
+
+    latest_dt = _ts_dt(latest)
+    if latest_dt:
+        age_min = (datetime.now(timezone.utc) - latest_dt).total_seconds() / 60.0
+        if age_min >= 60:
+            status = "idle"
+            hrs = int(age_min // 60)
+            mins = int(age_min % 60)
+            age_str = f"{hrs}h {mins}m" if hrs else f"{mins}m"
+            summary = f"{summary} (last activity {age_str} ago)"
+
     return status, summary
 
 
@@ -1290,10 +1431,9 @@ with tabs[0]:
     )
     st.markdown('<div class="section-header">📊 Status Snapshot</div>', unsafe_allow_html=True)
 
-    _ov_patterns = ["claude_*.json", "review_claude_*__by_openai.json"]
-    _ov_all_files = list_matching(_ov_patterns)
+    _ov_all_files = list_matching(output_patterns())
     _ov_latest_any = _latest_file(_ov_all_files)
-    _ov_latest_review_file = _latest_file([p for p in _ov_all_files if p.name.startswith("review_claude_")])
+    _ov_latest_review_file = _latest_file([p for p in _ov_all_files if p.name.startswith("review_")])
     inbox_raw = read_inbox()
     _ov_inbox_count = len([l for l in inbox_raw.splitlines() if l.strip()])
 
@@ -1478,8 +1618,8 @@ with tabs[0]:
 
     if models and st.button("Brief me"):
         inbox_text = inbox_raw.strip()
-        cpath = latest_claude()
-        rpath = latest_review()
+        cpath = latest_proposal_any()
+        rpath = latest_review_any()
 
         def _json_blob(p: Path | None) -> str:
             if not p:
@@ -1784,13 +1924,97 @@ with tabs[2]:
         "Inbox",
         "Agent directives and priorities — edit and save to guide the next cycle.",
     )
+    _inbox_raw = read_inbox()
+    _inbox_lines = [l for l in _inbox_raw.splitlines() if l.strip()]
+    _inbox_count = len(_inbox_lines)
+    _inbox_chars = len(_inbox_raw)
+    _inbox_has_urgent = any(
+        kw in _inbox_raw.lower()
+        for kw in ("urgent", "critical", "blocker", "asap", "!!!")
+    )
 
-    inbox = st.text_area("Edit", value=read_inbox(), height=420)
-    if st.button("Save inbox"):
-        write_inbox(inbox)
-        st.success("Inbox saved")
+    # Toolbar with stats
+    _urgent_badge = (
+        '<span class="inbox-stat" style="border-color:rgba(255,68,68,0.4);"><strong style="color:var(--danger);">⚠ Urgent items detected</strong></span>'
+        if _inbox_has_urgent else ""
+    )
+    st.markdown(
+        f"""
+        <div class="inbox-toolbar">
+            <span class="inbox-stat"><strong>{_inbox_count}</strong> directives</span>
+            <span class="inbox-stat"><strong>{_inbox_chars:,}</strong> chars</span>
+            {_urgent_badge}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-with tabs[4]:
+    # Two-column layout: editor + preview/help
+    _inbox_edit_col, _inbox_side_col = st.columns([2, 1], gap="large")
+
+    with _inbox_edit_col:
+        inbox = st.text_area(
+            "Edit directives",
+            value=_inbox_raw,
+            height=420,
+            key="inbox_editor",
+            help="One directive per line. The agent reads this before each cycle.",
+            label_visibility="collapsed",
+        )
+        _inbox_btn_cols = st.columns([1, 1, 3])
+        with _inbox_btn_cols[0]:
+            if st.button("💾 Save", key="save_inbox", use_container_width=True):
+                write_inbox(inbox)
+                st.success("Inbox saved ✓")
+        with _inbox_btn_cols[1]:
+            if st.button("🔄 Reload", key="reload_inbox", use_container_width=True):
+                st.rerun()
+
+    with _inbox_side_col:
+        st.markdown('<div class="section-header" style="margin-top:0; font-size:0.95rem;">📋 Preview</div>', unsafe_allow_html=True)
+        _preview_lines = [l for l in inbox.splitlines() if l.strip()]
+        if _preview_lines:
+            _preview_html_items = []
+            for _pl in _preview_lines[:20]:
+                _pl_escaped = _html.escape(_pl.strip())
+                _is_urgent = any(kw in _pl.lower() for kw in ("urgent", "critical", "blocker", "asap", "!!!"))
+                _dot_color = "var(--danger)" if _is_urgent else "var(--accent)"
+                _preview_html_items.append(
+                    f'<div style="display:flex;align-items:flex-start;gap:8px;padding:4px 0;font-size:0.8rem;">'
+                    f'<span style="color:{_dot_color};flex-shrink:0;margin-top:2px;">●</span>'
+                    f'<span style="color:var(--text);line-height:1.4;">{_pl_escaped}</span>'
+                    f'</div>'
+                )
+            st.markdown(
+                f'<div style="border:1px solid var(--accent-border);border-radius:10px;padding:10px 12px;'
+                f'background:rgba(7,12,7,0.4);max-height:380px;overflow-y:auto;">'
+                f'{"".join(_preview_html_items)}'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            if len(_preview_lines) > 20:
+                st.caption(f"…and {len(_preview_lines) - 20} more directives")
+        else:
+            st.markdown(
+                '<div class="empty-state" style="padding:20px 10px;">'
+                '<div class="empty-icon">📥</div>'
+                '<div class="empty-text">Inbox is empty. Add directives to guide the agent.</div>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+        st.markdown('<div class="section-header" style="font-size:0.85rem;">💡 Tips</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div style="font-size:0.78rem; color:var(--muted); line-height:1.6;">'
+            '• One directive per line<br>'
+            '• Use <code>URGENT:</code> prefix for high-priority items<br>'
+            '• Be specific: "improve health tab chart colors" > "fix stuff"<br>'
+            '• The agent reads this before every cycle'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+with tabs[3]:
     _page_context(
         "Outputs Library",
         "Browse proposals and reviews with search, filtering, and detail view.",
@@ -1800,8 +2024,7 @@ with tabs[4]:
         '<div style="font-size:0.82rem; color:var(--muted); margin-bottom:12px;">Tip: use the search box to filter by filename, then click any item to see full details.</div>',
         unsafe_allow_html=True,
     )
-    patterns = ["claude_*.json", "review_claude_*__by_openai.json"]
-    all_files = list_matching(patterns)
+    all_files = list_matching(output_patterns())
 
     def _summarize_output(p: Path) -> dict[str, str]:
         try:
@@ -1849,7 +2072,7 @@ with tabs[4]:
         )
     else:
         claude_files = [p for p in all_files if p.name.startswith("claude_")]
-        review_files = [p for p in all_files if p.name.startswith("review_claude_")]
+        review_files = [p for p in all_files if p.name.startswith("review_")]
         latest_any = _latest_file(all_files)
         latest_review = _latest_file(review_files)
 
@@ -1923,7 +2146,18 @@ with tabs[4]:
             else:
                 p = Path(sel)
                 meta = _summarize_output(p)
-                kind = "Claude proposal" if p.name.startswith("claude_") else "OpenAI review"
+                if p.name.startswith("review_"):
+                    kind = "Review"
+                elif p.name.startswith("openai_"):
+                    kind = "OpenAI proposal"
+                elif p.name.startswith("local_"):
+                    kind = "Local proposal"
+                elif p.name.startswith("codex_"):
+                    kind = "Codex proposal"
+                elif p.name.startswith("proposal_"):
+                    kind = "Proposal"
+                else:
+                    kind = "Claude proposal"
                 st.markdown(
                     f"""
                     <div class="glass-card">
@@ -1938,6 +2172,74 @@ with tabs[4]:
                 st.markdown("**Output JSON**")
                 try:
                     payload = read_json_file(p)
+                    decision = read_decision(p)
+                    is_proposal = not p.name.startswith("review_")
+
+                    def _as_list(value) -> list[str]:
+                        if isinstance(value, list):
+                            return [str(v) for v in value]
+                        if value:
+                            return [str(value)]
+                        return []
+
+                    if is_proposal and isinstance(payload, dict):
+                        st.markdown("**Proposal snapshot**")
+                        st.write(payload.get("summary") or "—")
+                        st.caption(payload.get("context") or "")
+                        actions = _as_list(payload.get("suggested_actions"))
+                        success = _as_list(payload.get("success_criteria"))
+                        if actions:
+                            st.markdown("**Suggested actions**")
+                            st.markdown("\n".join([f"- {item}" for item in actions]))
+                        if success:
+                            st.markdown("**Success criteria**")
+                            st.markdown("\n".join([f"- {item}" for item in success]))
+                        conf = payload.get("confidence")
+                        if conf is not None:
+                            st.caption(f"Confidence: {conf}")
+
+                    if decision:
+                        st.markdown("**Decision**")
+                        st.markdown(
+                            f"- Status: **{decision.get('decision','—')}**\n"
+                            f"- Time: {decision.get('timestamp','—')}\n"
+                            f"- Note: {decision.get('note') or '—'}"
+                        )
+                        if decision.get("priority_path"):
+                            st.caption(f"Approved priority: `{decision.get('priority_path')}`")
+
+                    if is_proposal and isinstance(payload, dict):
+                        st.markdown("**Approval controls**")
+                        note = st.text_input(
+                            "Decision note (optional)",
+                            key=f"decision_note_{p.name}",
+                            placeholder="Why approve or reject?",
+                        )
+                        btn_cols = st.columns(3)
+                        with btn_cols[0]:
+                            if st.button("Approve proposal", key=f"approve_{p.name}"):
+                                priority_path = write_priority_from_proposal(p, payload, note)
+                                write_decision(
+                                    p,
+                                    "APPROVE",
+                                    note=note,
+                                    extra={"priority_path": str(priority_path)},
+                                )
+                                st.success(f"Approved. Draft priority saved to {priority_path}.")
+                                st.rerun()
+                        with btn_cols[1]:
+                            if st.button("Reject proposal", key=f"reject_{p.name}"):
+                                write_decision(p, "REJECT", note=note)
+                                st.warning("Rejected. Decision recorded.")
+                                st.rerun()
+                        with btn_cols[2]:
+                            if decision and decision.get("priority_path"):
+                                if st.button("Promote to active", key=f"promote_{p.name}"):
+                                    promoted = promote_priority(Path(decision["priority_path"]))
+                                    trigger_run()
+                                    st.success(f"Promoted to active priority: {promoted}")
+                                    st.rerun()
+
                     st.json(payload)
                     st.download_button(
                         "Download JSON",
@@ -1949,14 +2251,13 @@ with tabs[4]:
                     st.error(f"Failed to read JSON: {e}")
                     st.code(p.read_text(encoding="utf-8")[:12000])
 
-with tabs[3]:
+with tabs[4]:
     _page_context(
         "Timeline",
         "Proposal activity over time — daily, weekly, and monthly breakdowns.",
     )
 
-    patterns = ["claude_*.json", "review_claude_*__by_openai.json"]
-    files = list_matching(patterns)
+    files = list_matching(output_patterns())
 
     def _counts_last_days(days: int = 14) -> dict[str, int]:
         today = datetime.now().date()
@@ -2038,36 +2339,106 @@ with tabs[5]:
         "Settings & Control",
         "Agent mode, diagnostics, and review controls.",
     )
+    _settings_left, _settings_right = st.columns([1, 1], gap="large")
 
-    current_mode = read_mode()
-    mode = st.radio("Mode", ["DIRECTED", "AUTONOMOUS"], index=0 if current_mode=="DIRECTED" else 1)
-    if mode != current_mode:
-        write_mode(mode)
-        st.success(f"Mode set to {mode}")
+    with _settings_left:
+        # ── Agent Mode ───────────────────────────────────────────
+        st.markdown(
+            '<div class="settings-section">'
+            '<h4>🎯 Agent Mode</h4>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        current_mode = read_mode()
+        _mode_desc = {
+            "DIRECTED": "Agent follows inbox directives strictly. Best for focused work.",
+            "AUTONOMOUS": "Agent self-selects improvements. Best for exploration.",
+        }
+        mode = st.radio(
+            "Operating mode",
+            ["DIRECTED", "AUTONOMOUS"],
+            index=0 if current_mode == "DIRECTED" else 1,
+            help=_mode_desc.get(current_mode, ""),
+        )
+        st.caption(_mode_desc.get(mode, ""))
+        if mode != current_mode:
+            write_mode(mode)
+            st.success(f"Mode → {mode}")
 
-    if st.button("Trigger run"):
-        trigger_run()
-        st.success("Triggered (wrote .trigger)")
+        st.markdown("")  # spacer
 
-    st.divider()
-    st.subheader("Diagnostics")
-    provider, model = _active_provider_model()
-    credit_status, credit_note = _credit_snapshot()
-    st.markdown(f"**Credits & usage**: {credit_status.upper()} · Provider: {provider.upper() if provider else 'UNKNOWN'} · Model: {model}")
-    st.caption(credit_note)
-    if st.button("Test Brief me (fast)"):
-        models, default_model = _openclaw_models()
-        if not models:
-            st.error("OpenClaw model not configured.")
+        # ── Cycle Control ────────────────────────────────────────
+        st.markdown(
+            '<div class="settings-section">'
+            '<h4>⚡ Cycle Control</h4>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        _set_last_cycle = _last_cycle_ts()
+        if _set_last_cycle:
+            _set_age = (datetime.now(timezone.utc) - _set_last_cycle).total_seconds() / 60.0
+            _set_age_str = f"{_set_age:.0f}m ago" if _set_age < 60 else f"{_set_age/60:.1f}h ago"
+            st.caption(f"Last cycle: {_fmt_time(_set_last_cycle.isoformat())} ({_set_age_str})")
         else:
-            try:
-                out = generate(default_model, "Reply with: OK", timeout=30)
-                st.success(f"Brief me test OK: {out.strip()[:50]}")
-            except Exception as e:
-                st.error(f"Brief me test failed: {e}")
+            st.caption("No cycle history yet.")
 
-    st.divider()
-    st.subheader("Review controls")
+        _trig_cols = st.columns(2)
+        with _trig_cols[0]:
+            if st.button("⚡ Trigger run", use_container_width=True):
+                trigger_run()
+                st.success("Triggered ✓")
+        with _trig_cols[1]:
+            if st.button("🔄 Kick cycle", key="settings_kick", use_container_width=True):
+                _touch_trigger("settings_kick")
+                st.success("Cycle kicked ✓")
+
+    with _settings_right:
+        # ── Diagnostics ─────────────────────────────────────────
+        st.markdown(
+            '<div class="settings-section">'
+            '<h4>🔍 Diagnostics</h4>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        provider, model = _active_provider_model()
+        credit_status, credit_note = _credit_snapshot()
+        _cred_variant = "ok" if credit_status == "ok" else ("warn" if credit_status == "low" else "neutral")
+        st.markdown(
+            f"""
+            <div class="kv-grid">
+                <span class="kv-key">Provider</span>
+                <span class="kv-val">{provider.upper() if provider else 'UNKNOWN'}</span>
+                <span class="kv-key">Model</span>
+                <span class="kv-val">{model}</span>
+                <span class="kv-key">Credits</span>
+                <span class="kv-val {_cred_variant}">{credit_status.upper()}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.caption(credit_note)
+
+        if st.button("🧪 Test OpenClaw", use_container_width=True):
+            models, default_model = _openclaw_models()
+            if not models:
+                st.error("OpenClaw model not configured.")
+            else:
+                with st.spinner("Testing…"):
+                    try:
+                        out = generate(default_model, "Reply with: OK", timeout=30)
+                        st.success(f"OpenClaw OK: {out.strip()[:50]}")
+                    except Exception as e:
+                        st.error(f"Test failed: {e}")
+
+        st.markdown("")  # spacer
+
+        # ── Review Controls ──────────────────────────────────────
+        st.markdown(
+            '<div class="settings-section">'
+            '<h4>📋 Review Controls</h4>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
     status_path = Path("/home/hackerman/agent-runtime/workspace/projects/agent-dashboard/status.json")
     current_status = "UNKNOWN"
     if status_path.exists():
@@ -2076,14 +2447,22 @@ with tabs[5]:
             current_status = data.get("status", "UNKNOWN")
         except Exception:
             current_status = "UNKNOWN"
-    st.caption(f"Current status: {current_status}")
-    cols = st.columns(2)
-    with cols[0]:
-        if st.button("Approve (DONE)"):
+    _status_variant = "ok" if current_status == "IN_PROGRESS" else ("warn" if current_status == "PENDING_HUMAN_REVIEW" else ("ok" if current_status == "DONE" else "neutral"))
+    st.markdown(
+        f'<div style="margin-bottom:10px;">'
+        f'<span class="status-chip {_status_variant}">{current_status}</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+    if current_status == "PENDING_HUMAN_REVIEW":
+        st.warning("Review required — the agent is waiting for your decision.")
+    _rev_cols = st.columns(2)
+    with _rev_cols[0]:
+        if st.button("✅ Approve (DONE)", use_container_width=True):
             _confirm_done()
 
-    with cols[1]:
-        if st.button("Continue work"):
+    with _rev_cols[1]:
+        if st.button("▶️ Continue work", use_container_width=True):
             _confirm_continue()
 
 with tabs[6]:
