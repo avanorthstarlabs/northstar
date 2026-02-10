@@ -1,17 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240" role="img" aria-label="Agent Dashboard Logo">
   <defs>
     <radialGradient id="glow" cx="50%" cy="40%" r="60%">
-      <stop offset="0%" stop-color="#34ff88" stop-opacity="0.9"/>
-      <stop offset="70%" stop-color="#00ff66" stop-opacity="0.25"/>
-      <stop offset="100%" stop-color="#00ff66" stop-opacity="0"/>
+      <stop offset="0%" stop-color="#6ea1ff" stop-opacity="0.9"/>
+      <stop offset="70%" stop-color="#4f8aff" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#4f8aff" stop-opacity="0"/>
     </radialGradient>
   </defs>
-  <rect width="240" height="240" fill="#06110b"/>
+  <rect width="240" height="240" fill="#0b0e17"/>
   <circle cx="120" cy="120" r="92" fill="url(#glow)"/>
-  <circle cx="120" cy="120" r="78" fill="none" stroke="#00ff66" stroke-width="6"/>
-  <circle cx="92" cy="104" r="8" fill="#00ff66"/>
-  <circle cx="148" cy="104" r="8" fill="#00ff66"/>
-  <path d="M80 138 Q120 168 160 138" fill="none" stroke="#00ff66" stroke-width="8" stroke-linecap="round"/>
-  <path d="M46 78 L66 90" stroke="#00ff66" stroke-width="4" stroke-linecap="round"/>
-  <path d="M194 78 L174 90" stroke="#00ff66" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="120" cy="120" r="78" fill="none" stroke="#4f8aff" stroke-width="6"/>
+  <circle cx="92" cy="104" r="8" fill="#4f8aff"/>
+  <circle cx="148" cy="104" r="8" fill="#4f8aff"/>
+  <path d="M80 138 Q120 168 160 138" fill="none" stroke="#4f8aff" stroke-width="8" stroke-linecap="round"/>
+  <path d="M46 78 L66 90" stroke="#4f8aff" stroke-width="4" stroke-linecap="round"/>
+  <path d="M194 78 L174 90" stroke="#4f8aff" stroke-width="4" stroke-linecap="round"/>
 </svg>

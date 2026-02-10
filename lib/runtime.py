@@ -69,9 +69,36 @@ def _decision_path(proposal_path: Path) -> Path:
     _ensure_parent(DECISIONS_DIR / "placeholder")
     return DECISIONS_DIR / f"decision_{proposal_path.stem}.json"
 
+def _priority_path_for_proposal(proposal_path: Path, proposal_obj: dict | None = None) -> Path:
+    proposal_id = None
+    if isinstance(proposal_obj, dict):
+        proposal_id = proposal_obj.get("proposal_id")
+    if not proposal_id:
+        proposal_id = proposal_path.stem
+    slug = _slugify(str(proposal_id), fallback=_slugify(proposal_path.stem))
+    return APPROVED_DIR / f"approved_{slug}.md"
+
 def read_decision(proposal_path: Path) -> dict | None:
     path = _decision_path(proposal_path)
     if not path.exists():
+        try:
+            proposal_obj = json.loads(proposal_path.read_text(encoding="utf-8"))
+        except Exception:
+            proposal_obj = None
+        inferred_priority = _priority_path_for_proposal(proposal_path, proposal_obj)
+        if inferred_priority.exists():
+            proposal_id = None
+            if isinstance(proposal_obj, dict):
+                proposal_id = proposal_obj.get("proposal_id")
+            return {
+                "proposal_path": str(proposal_path),
+                "proposal_id": proposal_id or proposal_path.stem,
+                "decision": "APPROVE",
+                "note": "inferred_from_priority",
+                "source": "dashboard",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "priority_path": str(inferred_priority),
+            }
         return None
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -118,6 +145,7 @@ def write_priority_from_proposal(proposal_path: Path, proposal_obj: dict, note: 
     out = APPROVED_DIR / f"approved_{slug}.md"
 
     summary = str(proposal_obj.get("summary") or "").strip()
+    proposal_text = proposal_obj.get("proposal_text")
     overview = proposal_obj.get("overview")
     project_summary = proposal_obj.get("project_summary")
     tech_details = proposal_obj.get("tech_details")
@@ -149,48 +177,54 @@ def write_priority_from_proposal(proposal_path: Path, proposal_obj: dict, note: 
         f"# Approved Proposal: {summary or proposal_id}",
         f"project: {header_project}",
         "",
-        "## Metadata",
-        f"- Proposal ID: {proposal_id}",
-        f"- Proposal File: {proposal_path}",
-        f"- Mode: {mode or '—'}",
-        f"- Confidence: {confidence if confidence is not None else '—'}",
-        f"- Approved At: {datetime.now(timezone.utc).isoformat()}",
     ]
-    if source_priority:
-        lines += [f"- Source Priority: {source_priority}"]
-    if note:
-        lines += ["- Approval Note: " + note]
-    lines += [
-        "",
-        "## Overview",
-        *_format_value(overview),
-        "",
-        "## Project Summary",
-        *_format_value(project_summary),
-        "",
-        "## Tech Details",
-        *_format_value(tech_details),
-        "",
-        "## Definition of Done",
-        *_format_value(definition_of_done),
-        "",
-        "## Summary",
-        summary or "—",
-        "",
-        "## Context",
-        context or "—",
-        "",
-        "## Reasoning",
-        reasoning or "—",
-        "",
-        "## Suggested Actions",
-    ]
-    lines += [f"- {item}" for item in suggested] if suggested else ["- —"]
-    lines += [
-        "",
-        "## Success Criteria",
-    ]
-    lines += [f"- {item}" for item in success] if success else ["- —"]
+    if proposal_text:
+        lines.append(str(proposal_text).strip())
+        lines.append("")
+    else:
+        lines += [
+            "## Metadata",
+            f"- Proposal ID: {proposal_id}",
+            f"- Proposal File: {proposal_path}",
+            f"- Mode: {mode or '—'}",
+            f"- Confidence: {confidence if confidence is not None else '—'}",
+            f"- Approved At: {datetime.now(timezone.utc).isoformat()}",
+        ]
+        if source_priority:
+            lines += [f"- Source Priority: {source_priority}"]
+        if note:
+            lines += ["- Approval Note: " + note]
+        lines += [
+            "",
+            "## Overview",
+            *_format_value(overview),
+            "",
+            "## Project Summary",
+            *_format_value(project_summary),
+            "",
+            "## Tech Details",
+            *_format_value(tech_details),
+            "",
+            "## Definition of Done",
+            *_format_value(definition_of_done),
+            "",
+            "## Summary",
+            summary or "—",
+            "",
+            "## Context",
+            context or "—",
+            "",
+            "## Reasoning",
+            reasoning or "—",
+            "",
+            "## Suggested Actions",
+        ]
+        lines += [f"- {item}" for item in suggested] if suggested else ["- —"]
+        lines += [
+            "",
+            "## Success Criteria",
+        ]
+        lines += [f"- {item}" for item in success] if success else ["- —"]
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out
 

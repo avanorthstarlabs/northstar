@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-02-09T17:53:36Z
+- Added persistent flash notices so approvals/rejections show feedback after rerun.
+
 ## 2026-02-09T07:41:32Z
 - Added proposal approval gate support + project slug in approved priorities.
 - Dashboard now shows overview/summary/tech details/definition of done in proposals.
@@ -173,3 +176,11 @@
 ## 2026-02-09T15:03:14.485300+00:00
 - Applied patch: dashboard_patch_2026-02-09T15-03-12.682514+00-00.diff
 
+## 2026-02-09T17:57:01+00:00
+- Applied patch: dashboard_patch_2026-02-09T17-56-59.000000+00-00.diff
+
+## 2026-02-09T18:06:10+00:00
+- Applied patch: dashboard_patch_2026-02-09T18-06-08.000000+00-00.diff
+
+## 2026-02-09T19:00:11+00:00
+- Added UI Watch health panel and removed unrelated local model probes.

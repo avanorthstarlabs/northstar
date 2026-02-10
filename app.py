@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+import os
 import re
 from zoneinfo import ZoneInfo
 import base64
@@ -37,97 +38,154 @@ PST = ZoneInfo("America/Los_Angeles")
 page_icon = str(ICON_PATH) if ICON_PATH.exists() else ":)"
 st.set_page_config(page_title="Agent Runtime Dashboard", layout="wide", page_icon=page_icon, initial_sidebar_state="auto")
 
+def _set_flash(kind: str, msg: str) -> None:
+    st.session_state["_flash"] = {"kind": kind, "msg": msg}
+
+def _render_flash() -> None:
+    flash = st.session_state.pop("_flash", None)
+    if not flash:
+        return
+    kind = flash.get("kind", "info")
+    msg = flash.get("msg", "")
+    if kind == "success":
+        st.success(msg)
+    elif kind == "warning":
+        st.warning(msg)
+    elif kind == "error":
+        st.error(msg)
+    else:
+        st.info(msg)
+
 # ── Global CSS ───────────────────────────────────────────────────
 st.markdown(
     """
     <style>
-    :root { 
-        --bg: #050705;
-        --panel: rgba(7, 12, 7, 0.72);
-        --panel-hover: rgba(12, 22, 12, 0.85);
-        --accent: #39ff14;
-        --accent-soft: rgba(57, 255, 20, 0.18);
-        --accent-border: rgba(57, 255, 20, 0.25);
-        --text: #eaffea;
-        --muted: #9ddc9d;
-        --danger: #ff4444;
-        --warn: #ffaa00;
+    /* ═══════════════════════════════════════════════════════════
+       Agent Runtime Dashboard — Visual Overhaul v2
+       Deep navy + electric blue, refined glass morphism
+       ═══════════════════════════════════════════════════════════ */
+    :root {
+        --bg: #0b0e17;
+        --bg-gradient-a: #0f1323;
+        --bg-gradient-b: #0b0e17;
+        --bg-gradient-c: #080a12;
+        --panel: rgba(15, 19, 35, 0.75);
+        --panel-hover: rgba(20, 26, 48, 0.88);
+        --panel-solid: #111628;
+        --accent: #4f8aff;
+        --accent-bright: #6ea1ff;
+        --accent-soft: rgba(79, 138, 255, 0.14);
+        --accent-border: rgba(79, 138, 255, 0.22);
+        --accent-glow: rgba(79, 138, 255, 0.30);
+        --text: #e8ecf4;
+        --text-heading: #f0f4ff;
+        --muted: #8892a8;
+        --danger: #ff5c5c;
+        --danger-soft: rgba(255, 92, 92, 0.12);
+        --warn: #ffb347;
+        --warn-soft: rgba(255, 179, 71, 0.12);
+        --success: #34d399;
+        --success-soft: rgba(52, 211, 153, 0.12);
+        --radius: 10px;
+        --radius-lg: 14px;
+        --shadow-sm: 0 2px 8px rgba(0,0,0,0.18);
+        --shadow-md: 0 4px 20px rgba(0,0,0,0.28);
+        --shadow-lg: 0 8px 32px rgba(0,0,0,0.38);
+        --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     }
+
+    /* ── Global ─────────────────────────────────────────────── */
     .stApp {
-        background: radial-gradient(1200px 800px at 20% 10%, #0a140a 0%, #050705 55%, #030403 100%);
+        background: linear-gradient(145deg, var(--bg-gradient-a) 0%, var(--bg-gradient-b) 50%, var(--bg-gradient-c) 100%);
         color: var(--text);
+        font-family: var(--font);
     }
-    h1, h2, h3, h4 { color: var(--text); }
+    h1, h2, h3, h4 { color: var(--text-heading); }
     .stMarkdown, .stCaption, .stText, .stTextArea textarea { color: var(--text); }
-    /* Reduce extra top whitespace */
-    .block-container { padding-top: 1.25rem; }
+    .block-container { padding-top: 2.25rem; }
+
+    /* ── Buttons ─────────────────────────────────────────────── */
     .stButton>button {
-        background: transparent;
-        border: 1px solid var(--accent);
-        color: var(--accent);
-        box-shadow: 0 0 12px rgba(57,255,20,0.15);
-        transition: all 150ms ease;
+        background: var(--accent-soft);
+        border: 1px solid var(--accent-border);
+        color: var(--accent-bright);
+        border-radius: var(--radius);
+        font-weight: 600;
+        font-size: 0.82rem;
+        box-shadow: var(--shadow-sm);
+        transition: all 180ms ease;
     }
     .stButton>button:hover {
-        background: var(--accent-soft);
+        background: rgba(79, 138, 255, 0.22);
         border-color: var(--accent);
-        box-shadow: 0 0 20px rgba(57,255,20,0.3);
+        box-shadow: 0 0 16px var(--accent-glow);
+        transform: translateY(-1px);
     }
     div[data-baseweb="select"] > div {
-        background: rgba(7, 12, 7, 0.6) !important;
-        border-color: var(--accent) !important;
+        background: var(--panel) !important;
+        border-color: var(--accent-border) !important;
     }
-    /* Glass grid & cards */
+
+    /* ── Glass grid & cards ──────────────────────────────────── */
     .card-title-row{display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:6px;}
-    .card-title-row .title{font-weight:700; font-size:1.02rem; color:var(--accent); margin:0;}
+    .card-title-row .title{font-weight:700; font-size:1.02rem; color:var(--accent-bright); margin:0;}
     .card-title-row .meta{font-size:0.74rem; color:var(--muted); opacity:0.85; white-space:nowrap;}
     .subtle{font-size:0.78rem;color:var(--muted);line-height:1.6;opacity:0.85;}
     .glass-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin:12px 0 20px;}
     .glass-card {
-        padding:16px 18px;border-radius:14px;
+        padding:18px 20px;border-radius:var(--radius-lg);
         background:var(--panel);
         border:1px solid var(--accent-border);
-        backdrop-filter: blur(8px);
-        box-shadow: 0 6px 24px rgba(0,0,0,0.35);
-        transition: border-color 200ms ease, box-shadow 200ms ease;
+        backdrop-filter: blur(12px);
+        box-shadow: var(--shadow-md);
+        transition: border-color 200ms ease, box-shadow 200ms ease, transform 180ms ease;
         overflow: hidden;
     }
     .glass-card:hover {
-        border-color: rgba(57,255,20,0.45);
-        box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+        border-color: rgba(79, 138, 255, 0.45);
+        box-shadow: var(--shadow-lg);
+        transform: translateY(-2px);
     }
-    .glass-title {font-weight:600;font-size:0.95rem;margin-bottom:6px;color:var(--accent);}
+    .glass-title {font-weight:600;font-size:0.95rem;margin-bottom:6px;color:var(--accent-bright);}
     .glass-meta {opacity:0.8;font-size:0.8rem;color:var(--muted);line-height:1.5;}
+
+    /* ── Pulse animation ─────────────────────────────────────── */
     .pulse {
         display:inline-block;width:10px;height:10px;border-radius:999px;
         margin-right:8px;background:var(--accent);
-        box-shadow:0 0 12px rgba(57,255,20,0.6);
-        animation:pulse 1.6s ease-in-out infinite;
+        box-shadow:0 0 12px var(--accent-glow);
+        animation:pulse 1.8s ease-in-out infinite;
     }
-    /* ── Header: unified control-center top bar ───────────────── */
+    @keyframes pulse {
+        0% {transform:scale(0.85); opacity:0.5;}
+        50% {transform:scale(1.15); opacity:1;}
+        100% {transform:scale(0.85); opacity:0.5;}
+    }
+
+    /* ── Topbar ──────────────────────────────────────────────── */
     .topbar {
         position: sticky;
         top: 0;
         z-index: 80;
-        margin: -0.25rem 0 12px;
-        padding: 12px 14px;
-        border-radius: 14px;
-        background: rgba(7, 12, 7, 0.55);
+        margin: 0 0 16px;
+        padding: 14px 18px;
+        border-radius: var(--radius-lg);
+        background: rgba(15, 19, 35, 0.65);
         border: 1px solid var(--accent-border);
-        backdrop-filter: blur(10px);
-        box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+        backdrop-filter: blur(14px) saturate(1.2);
+        box-shadow: var(--shadow-lg);
     }
     .topbar-row {
         display: flex;
         align-items: center;
-        gap: 12px;
+        gap: 14px;
         justify-content: space-between;
         flex-wrap: wrap;
     }
     .topbar-left {
         display:flex;
         align-items:center;
-        gap: 12px;
+        gap: 14px;
         min-width: 260px;
         flex: 1;
     }
@@ -138,13 +196,12 @@ st.markdown(
         min-width: 0;
     }
     .topbar-title .h {
-        margin: 0;
-        padding: 0;
-        font-size: 1.45rem;
+        margin: 0; padding: 0;
+        font-size: 1.4rem;
         font-weight: 800;
         letter-spacing: -0.02em;
-        color: var(--text);
-        line-height: 1.1;
+        color: var(--text-heading);
+        line-height: 1.15;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -163,32 +220,6 @@ st.markdown(
         flex-wrap: wrap;
         justify-content: flex-end;
     }
-    .meta-chip {
-        display:inline-flex;
-        align-items: center;
-        gap: 8px;
-        padding: 6px 10px;
-        border-radius: 999px;
-        border: 1px solid var(--accent-border);
-        background: rgba(7, 12, 7, 0.40);
-        color: var(--muted);
-        font-size: 0.75rem;
-        white-space: nowrap;
-    }
-    .meta-chip strong { color: var(--text); font-weight: 700; }
-    .meta-chip .dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 999px;
-        background: var(--muted);
-        opacity: 0.7;
-        box-shadow: none;
-        flex-shrink: 0;
-    }
-    .meta-chip.ok .dot { background: var(--accent); opacity: 1; box-shadow: 0 0 10px rgba(57,255,20,0.35); }
-    .meta-chip.warn .dot { background: var(--warn); opacity: 1; box-shadow: 0 0 10px rgba(255,170,0,0.25); }
-    .meta-chip.error .dot { background: var(--danger); opacity: 1; box-shadow: 0 0 10px rgba(255,68,68,0.25); }
-    .meta-chip.neutral .dot { background: var(--muted); opacity: 0.7; box-shadow:none; }
     .topbar-actions {
         display:flex;
         gap: 8px;
@@ -196,50 +227,99 @@ st.markdown(
         flex-wrap: wrap;
     }
     .topbar-actions .stButton>button {
-        padding: 6px 10px;
-        border-radius: 10px;
+        padding: 6px 12px;
+        border-radius: var(--radius);
         font-size: 0.82rem;
         min-height: 36px;
     }
     .topbar-actions .stButton>button:hover {
         transform: translateY(-1px);
     }
-    /* Compact data strip */
+
+    /* ── Meta chips ──────────────────────────────────────────── */
+    .meta-chip {
+        display:inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(136, 146, 168, 0.2);
+        background: rgba(15, 19, 35, 0.5);
+        color: var(--muted);
+        font-size: 0.75rem;
+        white-space: nowrap;
+    }
+    .meta-chip strong { color: var(--text); font-weight: 700; }
+    .meta-chip .dot {
+        width: 8px; height: 8px; border-radius: 999px;
+        background: var(--muted); opacity: 0.5;
+        box-shadow: none; flex-shrink: 0;
+    }
+    .meta-chip.ok .dot { background: var(--success); opacity: 1; box-shadow: 0 0 8px rgba(52,211,153,0.35); }
+    .meta-chip.warn .dot { background: var(--warn); opacity: 1; box-shadow: 0 0 8px rgba(255,179,71,0.3); }
+    .meta-chip.error .dot { background: var(--danger); opacity: 1; box-shadow: 0 0 8px rgba(255,92,92,0.3); }
+    .meta-chip.neutral .dot { background: var(--muted); opacity: 0.5; box-shadow:none; }
+
+    /* ── Data strip ──────────────────────────────────────────── */
     .data-strip{
         display:flex; flex-wrap:wrap; gap:10px;
-        padding:10px 12px; margin: 8px 0 14px;
-        border-radius: 12px;
-        background: rgba(7, 12, 7, 0.45);
+        padding:10px 14px; margin: 8px 0 14px;
+        border-radius: var(--radius-lg);
+        background: rgba(15, 19, 35, 0.5);
         border: 1px solid var(--accent-border);
-        backdrop-filter: blur(6px);
+        backdrop-filter: blur(8px);
     }
-    @keyframes pulse {
-        0% {transform:scale(0.9); opacity:0.6;}
-        50% {transform:scale(1.2); opacity:1;}
-        100% {transform:scale(0.9); opacity:0.6;}
-    }
-    /* Section dividers */
-    .section-header {
-        font-size:1.1rem;font-weight:700;color:var(--accent);
-        margin:20px 0 8px;padding-bottom:6px;
-        border-bottom:1px solid var(--accent-border);
-    }
-    /* Metric cards */
-    [data-testid="stMetricValue"] { color: var(--accent) !important; font-weight: 700; }
-    [data-testid="stMetricLabel"] { color: var(--muted) !important; }
 
-    /* ── Tab bar overhaul ─────────────────────────────────────── */
-    /* Container strip */
-    div[data-baseweb="tab-list"] {
-        background: rgba(7, 12, 7, 0.6);
+    /* ── Section headers ─────────────────────────────────────── */
+    .section-header {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--accent-bright);
+        margin: 24px 0 10px;
+        padding: 0 0 8px;
+        border-bottom: 1px solid var(--accent-border);
+        letter-spacing: 0.02em;
+    }
+
+    /* ── Metric cards ────────────────────────────────────────── */
+    [data-testid="stMetricValue"] {
+        color: var(--accent-bright) !important;
+        font-weight: 700;
+        font-size: 1.6rem !important;
+    }
+    [data-testid="stMetricLabel"] {
+        color: var(--muted) !important;
+        font-size: 0.78rem !important;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+    }
+    [data-testid="stMetricDelta"] {
+        font-size: 0.75rem !important;
+    }
+    div[data-testid="metric-container"] {
+        background: var(--panel);
         border: 1px solid var(--accent-border);
-        border-radius: 12px;
+        border-radius: var(--radius);
+        padding: 14px 16px 10px;
+        backdrop-filter: blur(8px);
+    }
+
+    /* ── Tab bar ─────────────────────────────────────────────── */
+    div[data-baseweb="tab-list"] {
+        background: rgba(15, 19, 35, 0.6);
+        border: 1px solid var(--accent-border);
+        border-radius: var(--radius);
         padding: 4px 6px;
         gap: 2px;
-        backdrop-filter: blur(6px);
+        backdrop-filter: blur(8px);
         overflow-x: auto;
+        scrollbar-width: thin;
+        scrollbar-color: var(--accent-border) transparent;
     }
-    /* Individual tab buttons */
+    div[data-baseweb="tab-list"]::-webkit-scrollbar { height: 4px; }
+    div[data-baseweb="tab-list"]::-webkit-scrollbar-thumb {
+        background: var(--accent-border); border-radius: 4px;
+    }
     div[data-baseweb="tab-list"] button[data-baseweb="tab"] {
         background: transparent !important;
         border: 1px solid transparent !important;
@@ -247,44 +327,28 @@ st.markdown(
         color: var(--muted) !important;
         font-weight: 500 !important;
         font-size: 0.82rem !important;
-        padding: 6px 14px !important;
+        padding: 7px 14px !important;
         transition: all 150ms ease !important;
         white-space: nowrap;
     }
     div[data-baseweb="tab-list"] button[data-baseweb="tab"]:hover {
         background: var(--accent-soft) !important;
-        color: var(--accent) !important;
+        color: var(--accent-bright) !important;
         border-color: var(--accent-border) !important;
     }
     div[data-baseweb="tab-list"] button[aria-selected="true"] {
         background: var(--accent-soft) !important;
         border: 1px solid var(--accent) !important;
-        color: var(--accent) !important;
+        color: var(--accent-bright) !important;
         font-weight: 700 !important;
-        box-shadow: 0 0 14px rgba(57,255,20,0.18) !important;
+        box-shadow: 0 0 12px var(--accent-glow) !important;
     }
-    /* Kill the default Streamlit blue underline */
-    div[data-baseweb="tab-highlight"] {
-        display: none !important;
-    }
+    div[data-baseweb="tab-highlight"],
     div[data-baseweb="tab-border"] {
         display: none !important;
     }
 
-    /* ── Scrollable tab strip on small screens ────────────────── */
-    div[data-baseweb="tab-list"] {
-        scrollbar-width: thin;
-        scrollbar-color: var(--accent-border) transparent;
-    }
-    div[data-baseweb="tab-list"]::-webkit-scrollbar {
-        height: 4px;
-    }
-    div[data-baseweb="tab-list"]::-webkit-scrollbar-thumb {
-        background: var(--accent-border);
-        border-radius: 4px;
-    }
-
-    /* ── Status badge chips ───────────────────────────────────── */
+    /* ── Status badge chips ──────────────────────────────────── */
     .status-chip {
         display: inline-flex;
         align-items: center;
@@ -298,27 +362,27 @@ st.markdown(
         white-space: nowrap;
     }
     .status-chip.ok {
-        background: rgba(57, 255, 20, 0.12);
-        border: 1px solid rgba(57, 255, 20, 0.35);
-        color: var(--accent);
+        background: var(--success-soft);
+        border: 1px solid rgba(52, 211, 153, 0.35);
+        color: var(--success);
     }
     .status-chip.warn {
-        background: rgba(255, 170, 0, 0.12);
-        border: 1px solid rgba(255, 170, 0, 0.35);
+        background: var(--warn-soft);
+        border: 1px solid rgba(255, 179, 71, 0.35);
         color: var(--warn);
     }
     .status-chip.error {
-        background: rgba(255, 68, 68, 0.12);
-        border: 1px solid rgba(255, 68, 68, 0.35);
+        background: var(--danger-soft);
+        border: 1px solid rgba(255, 92, 92, 0.35);
         color: var(--danger);
     }
     .status-chip.neutral {
-        background: rgba(157, 220, 157, 0.10);
-        border: 1px solid rgba(157, 220, 157, 0.25);
+        background: rgba(136, 146, 168, 0.10);
+        border: 1px solid rgba(136, 146, 168, 0.25);
         color: var(--muted);
     }
 
-    /* ── Activity timeline ────────────────────────────────────── */
+    /* ── Activity timeline ───────────────────────────────────── */
     .activity-timeline {
         display: flex;
         flex-direction: column;
@@ -351,30 +415,19 @@ st.markdown(
         border-radius: 50%;
         background: var(--accent);
         border: 2px solid var(--bg);
-        box-shadow: 0 0 8px rgba(57, 255, 20, 0.4);
+        box-shadow: 0 0 8px var(--accent-glow);
         flex-shrink: 0;
     }
     .activity-dot.dimmed {
         background: var(--muted);
         box-shadow: none;
-        opacity: 0.5;
+        opacity: 0.4;
     }
-    .activity-content {
-        flex: 1;
-        min-width: 0;
-    }
-    .activity-ts {
-        font-size: 0.72rem;
-        color: var(--muted);
-        opacity: 0.7;
-    }
-    .activity-text {
-        font-size: 0.82rem;
-        color: var(--text);
-        line-height: 1.4;
-    }
+    .activity-content { flex: 1; min-width: 0; }
+    .activity-ts { font-size: 0.72rem; color: var(--muted); opacity: 0.7; }
+    .activity-text { font-size: 0.82rem; color: var(--text); line-height: 1.4; }
 
-    /* ── Overview hero grid ───────────────────────────────────── */
+    /* ── Hero grid ───────────────────────────────────────────── */
     .hero-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -382,17 +435,22 @@ st.markdown(
         margin: 8px 0 16px;
     }
     .hero-stat {
-        padding: 14px 16px;
-        border-radius: 12px;
+        padding: 16px 18px;
+        border-radius: var(--radius);
         background: var(--panel);
         border: 1px solid var(--accent-border);
-        backdrop-filter: blur(8px);
+        backdrop-filter: blur(10px);
         text-align: center;
+        transition: border-color 200ms ease, transform 180ms ease;
+    }
+    .hero-stat:hover {
+        border-color: rgba(79, 138, 255, 0.4);
+        transform: translateY(-1px);
     }
     .hero-stat .value {
-        font-size: 1.5rem;
+        font-size: 1.55rem;
         font-weight: 700;
-        color: var(--accent);
+        color: var(--accent-bright);
         line-height: 1.2;
     }
     .hero-stat .label {
@@ -402,64 +460,11 @@ st.markdown(
         letter-spacing: 0.06em;
         margin-top: 4px;
     }
-    div[data-baseweb="tab-border"] {
-        display: none !important;
-    }
 
-    /* ── Section headers ──────────────────────────────────────── */
-    .section-header {
-        font-size: 1.15rem;
-        font-weight: 700;
-        color: var(--accent);
-        margin: 24px 0 10px;
-        padding: 0 0 8px;
-        border-bottom: 1px solid var(--accent-border);
-        letter-spacing: 0.02em;
-    }
-
-    /* ── Glass cards v2 ───────────────────────────────────────── */
-    .glass-card {
-        padding: 18px 20px;
-        border-radius: 14px;
-        background: var(--panel);
-        border: 1px solid var(--accent-border);
-        backdrop-filter: blur(10px);
-        box-shadow: 0 6px 28px rgba(0,0,0,0.4);
-        transition: border-color 200ms ease, box-shadow 200ms ease, transform 180ms ease;
-    }
-    .glass-card:hover {
-        border-color: rgba(57,255,20,0.5);
-        box-shadow: 0 8px 36px rgba(0,0,0,0.5);
-        transform: translateY(-1px);
-    }
-
-    /* ── Metric cards ─────────────────────────────────────────── */
-    [data-testid="stMetricValue"] {
-        color: var(--accent) !important;
-        font-weight: 700;
-        font-size: 1.6rem !important;
-    }
-    [data-testid="stMetricLabel"] {
-        color: var(--muted) !important;
-        font-size: 0.78rem !important;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-    }
-    [data-testid="stMetricDelta"] {
-        font-size: 0.75rem !important;
-    }
-    div[data-testid="metric-container"] {
-        background: var(--panel);
-        border: 1px solid var(--accent-border);
-        border-radius: 12px;
-        padding: 14px 16px 10px;
-        backdrop-filter: blur(6px);
-    }
-
-    /* ── Expander styling ─────────────────────────────────────── */
+    /* ── Expanders ────────────────────────────────────────────── */
     details[data-testid="stExpander"] {
         border: 1px solid var(--accent-border) !important;
-        border-radius: 10px !important;
+        border-radius: var(--radius) !important;
         background: var(--panel) !important;
     }
     details[data-testid="stExpander"] summary {
@@ -467,129 +472,127 @@ st.markdown(
         font-weight: 500;
     }
 
-    /* ── Dividers ─────────────────────────────────────────────── */
+    /* ── Dividers ────────────────────────────────────────────── */
     hr {
         border: none !important;
         border-top: 1px solid var(--accent-border) !important;
         margin: 20px 0 !important;
     }
 
-    /* ── Sidebar polish ───────────────────────────────────────── */
+    /* ── Sidebar ─────────────────────────────────────────────── */
     section[data-testid="stSidebar"] {
-        background: rgba(5, 8, 5, 0.92) !important;
+        background: rgba(11, 14, 23, 0.95) !important;
         border-right: 1px solid var(--accent-border);
+    }
+    section[data-testid="stSidebar"] > div:first-child {
+        padding-top: 1rem;
     }
     section[data-testid="stSidebar"] .stButton>button {
         font-size: 0.82rem;
     }
 
-    /* ── Text area / inputs ───────────────────────────────────── */
+    /* ── Inputs ──────────────────────────────────────────────── */
     .stTextArea textarea, .stTextInput input {
-        background: rgba(7, 12, 7, 0.6) !important;
+        background: rgba(15, 19, 35, 0.65) !important;
         border-color: var(--accent-border) !important;
         color: var(--text) !important;
         border-radius: 8px !important;
     }
-    /* ── Chat message styling ─────────────────────────────────── */
+    .stTextArea textarea:focus, .stTextInput input:focus {
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 3px rgba(79, 138, 255, 0.12) !important;
+    }
+
+    /* ── Chat messages ───────────────────────────────────────── */
     div[data-testid="stChatMessage"] {
         background: var(--panel) !important;
         border: 1px solid var(--accent-border) !important;
-        border-radius: 12px !important;
+        border-radius: var(--radius) !important;
         margin-bottom: 8px;
     }
 
-    /* ── Compact toast / success / warning / error ────────────── */
+    /* ── Alerts ──────────────────────────────────────────────── */
     div[data-testid="stAlert"] {
-        border-radius: 10px !important;
+        border-radius: var(--radius) !important;
         font-size: 0.85rem !important;
     }
 
-    /* ── Code block styling ───────────────────────────────────── */
+    /* ── Code blocks ─────────────────────────────────────────── */
     pre {
-        background: rgba(5, 8, 5, 0.7) !important;
+        background: rgba(8, 10, 18, 0.8) !important;
         border: 1px solid var(--accent-border) !important;
         border-radius: 8px !important;
     }
 
-    /* ── Radio / toggle styling ───────────────────────────────── */
+    /* ── Radio / toggle ──────────────────────────────────────── */
     div[data-baseweb="radio"] label span {
         color: var(--text) !important;
     }
 
-    /* ── Download button ──────────────────────────────────────── */
+    /* ── Download button ─────────────────────────────────────── */
     .stDownloadButton > button {
         background: transparent !important;
         border: 1px solid var(--accent) !important;
-        color: var(--accent) !important;
+        color: var(--accent-bright) !important;
     }
     .stDownloadButton > button:hover {
         background: var(--accent-soft) !important;
     }
 
-    /* ── Breadcrumb / page context bar ────────────────────────── */
+    /* ── Page context bar ────────────────────────────────────── */
     .page-context-bar {
         display: flex;
         align-items: center;
         justify-content: space-between;
         padding: 8px 16px;
         margin: 0 0 16px;
-        border-radius: 10px;
-        background: rgba(7, 12, 7, 0.45);
+        border-radius: var(--radius);
+        background: rgba(15, 19, 35, 0.5);
         border: 1px solid var(--accent-border);
         font-size: 0.8rem;
         color: var(--muted);
     }
     .page-context-bar .ctx-title {
         font-weight: 700;
-        color: var(--accent);
+        color: var(--accent-bright);
         font-size: 0.9rem;
     }
-    .page-context-bar .ctx-meta {
-        opacity: 0.8;
-    }
+    .page-context-bar .ctx-meta { opacity: 0.8; }
 
-    /* ── Empty state styling ──────────────────────────────────── */
+    /* ── Empty state ─────────────────────────────────────────── */
     .empty-state {
         text-align: center;
-        padding: 40px 20px;
+        padding: 48px 24px;
         color: var(--muted);
-        opacity: 0.7;
+        opacity: 0.65;
     }
-    .empty-state .empty-icon {
-        font-size: 2.5rem;
-        margin-bottom: 8px;
-    }
-    .empty-state .empty-text {
-        font-size: 0.9rem;
-    }
+    .empty-state .empty-icon { font-size: 2.5rem; margin-bottom: 10px; }
+    .empty-state .empty-text { font-size: 0.9rem; }
 
-    /* ── Footer ───────────────────────────────────────────────── */
+    /* ── Footer ──────────────────────────────────────────────── */
     .dashboard-footer {
         text-align: center;
         padding: 20px 0 8px;
         font-size: 0.7rem;
         color: var(--muted);
-        opacity: 0.5;
+        opacity: 0.4;
         border-top: 1px solid var(--accent-border);
         margin-top: 40px;
     }
 
-    /* ── Keyboard shortcut hint ───────────────────────────────── */
+    /* ── Keyboard hint ───────────────────────────────────────── */
     .kbd {
         display: inline-block;
         padding: 1px 6px;
-        border: 1px solid var(--accent-border);
+        border: 1px solid rgba(136,146,168,0.3);
         border-radius: 4px;
         font-size: 0.7rem;
         color: var(--muted);
-        background: rgba(7, 12, 7, 0.5);
+        background: rgba(15, 19, 35, 0.5);
         font-family: monospace;
     }
 
-    /* ── Sidebar navigation overhaul ──────────────────────────── */
-    section[data-testid="stSidebar"] > div:first-child {
-        padding-top: 1rem;
-    }
+    /* ── Sidebar navigation ──────────────────────────────────── */
     .sidebar-nav {
         display: flex;
         flex-direction: column;
@@ -605,28 +608,21 @@ st.markdown(
         font-size: 0.82rem;
         color: var(--muted);
         cursor: default;
-        transition: all 120ms ease;
+        transition: all 140ms ease;
         border: 1px solid transparent;
     }
     .sidebar-nav-item:hover {
         background: var(--accent-soft);
-        color: var(--accent);
+        color: var(--accent-bright);
         border-color: var(--accent-border);
     }
-    .sidebar-nav-item .nav-icon {
-        font-size: 1rem;
-        width: 22px;
-        text-align: center;
-        flex-shrink: 0;
-    }
-    .sidebar-nav-item .nav-label {
-        font-weight: 500;
-    }
+    .sidebar-nav-item .nav-icon { font-size: 1rem; width: 22px; text-align: center; flex-shrink: 0; }
+    .sidebar-nav-item .nav-label { font-weight: 500; }
     .sidebar-nav-item .nav-badge {
         margin-left: auto;
         background: var(--accent-soft);
         border: 1px solid var(--accent-border);
-        color: var(--accent);
+        color: var(--accent-bright);
         font-size: 0.68rem;
         font-weight: 700;
         padding: 1px 7px;
@@ -634,14 +630,14 @@ st.markdown(
         line-height: 1.4;
     }
 
-    /* ── Sidebar compact status card ──────────────────────────── */
+    /* ── Sidebar status card ─────────────────────────────────── */
     .sb-status-card {
         border: 1px solid var(--accent-border);
-        border-radius: 10px;
+        border-radius: var(--radius);
         padding: 12px 14px;
         margin-bottom: 14px;
-        background: rgba(7, 12, 7, 0.5);
-        backdrop-filter: blur(6px);
+        background: rgba(15, 19, 35, 0.55);
+        backdrop-filter: blur(8px);
     }
     .sb-status-row {
         display: flex;
@@ -650,41 +646,25 @@ st.markdown(
         font-size: 0.82rem;
         padding: 3px 0;
     }
-    .sb-status-row .sb-icon {
-        width: 18px;
-        text-align: center;
-        flex-shrink: 0;
-    }
-    .sb-status-row .sb-label {
-        color: var(--muted);
-        min-width: 52px;
-    }
-    .sb-status-row .sb-value {
-        color: var(--text);
-        font-weight: 600;
-    }
-    .sb-status-row .sb-value.ok { color: var(--accent); }
+    .sb-status-row .sb-icon { width: 18px; text-align: center; flex-shrink: 0; }
+    .sb-status-row .sb-label { color: var(--muted); min-width: 52px; }
+    .sb-status-row .sb-value { color: var(--text); font-weight: 600; }
+    .sb-status-row .sb-value.ok { color: var(--success); }
     .sb-status-row .sb-value.warn { color: var(--warn); }
     .sb-status-row .sb-value.error { color: var(--danger); }
     .sb-status-row .sb-value.neutral { color: var(--muted); }
-
-    .sb-divider {
-        border: none;
-        border-top: 1px solid var(--accent-border);
-        margin: 10px 0;
-    }
-
+    .sb-divider { border: none; border-top: 1px solid var(--accent-border); margin: 10px 0; }
     .sb-section-label {
         font-size: 0.68rem;
         text-transform: uppercase;
         letter-spacing: 0.08em;
         color: var(--muted);
-        opacity: 0.6;
+        opacity: 0.55;
         margin: 14px 0 6px;
         padding-left: 2px;
     }
 
-    /* ── Sidebar action buttons ───────────────────────────────── */
+    /* ── Sidebar action buttons ──────────────────────────────── */
     section[data-testid="stSidebar"] .stButton > button {
         font-size: 0.8rem;
         padding: 6px 12px;
@@ -705,57 +685,55 @@ st.markdown(
         padding: 6px 12px;
         border-radius: 8px;
         color: var(--text);
-        background: rgba(7, 12, 7, 0.4);
+        background: rgba(15, 19, 35, 0.45);
         border: 1px solid var(--accent-border);
         text-decoration: none;
         font-weight: 600;
         transition: all 0.2s ease;
         box-sizing: border-box;
     }
+    section[data-testid="stSidebar"] .sb-link-btn:hover {
+        background: var(--accent-soft);
+        border-color: var(--accent);
+        transform: translateX(2px);
+    }
 
-    /* ── Inbox: editor + preview overhaul ─────────────────────── */
+    /* ── Inbox components ────────────────────────────────────── */
     .inbox-shell{
         display:flex; flex-direction:column; gap:10px;
         padding: 14px 16px;
-        border-radius: 14px;
+        border-radius: var(--radius-lg);
         background: var(--panel);
         border: 1px solid var(--accent-border);
-        backdrop-filter: blur(10px);
-        box-shadow: 0 6px 28px rgba(0,0,0,0.35);
+        backdrop-filter: blur(12px);
+        box-shadow: var(--shadow-md);
     }
-    .inbox-shell .hint{
-        font-size:0.78rem; color:var(--muted); opacity:0.8; line-height:1.5;
-    }
+    .inbox-shell .hint{ font-size:0.78rem; color:var(--muted); opacity:0.8; line-height:1.5; }
     .inbox-help-card{
         padding: 14px 16px;
-        border-radius: 14px;
-        background: rgba(7, 12, 7, 0.40);
+        border-radius: var(--radius-lg);
+        background: rgba(15, 19, 35, 0.45);
         border: 1px solid var(--accent-border);
         backdrop-filter: blur(8px);
     }
     .inbox-help-card h4{
-        margin:0 0 8px;
-        font-size:0.9rem;
-        color: var(--accent);
-        letter-spacing:0.02em;
+        margin:0 0 8px; font-size:0.9rem;
+        color: var(--accent-bright); letter-spacing:0.02em;
     }
     .pill{
         display:inline-flex; align-items:center; gap:8px;
-        padding:5px 10px;
-        border-radius: 999px;
+        padding:5px 10px; border-radius: 999px;
         border: 1px solid var(--accent-border);
-        background: rgba(7, 12, 7, 0.45);
-        color: var(--muted);
-        font-size: 0.74rem;
-        white-space: nowrap;
+        background: rgba(15, 19, 35, 0.5);
+        color: var(--muted); font-size: 0.74rem; white-space: nowrap;
     }
     .pill strong{color:var(--text); font-weight:700;}
-    .pill.urgent{border-color: rgba(255,68,68,0.35); color: rgba(255,170,170,0.95);}
+    .pill.urgent{border-color: rgba(255,92,92,0.35); color: rgba(255,180,180,0.95);}
     .pill.urgent strong{color: var(--danger);}
     .inbox-preview{
         border:1px solid var(--accent-border);
-        border-radius: 14px;
-        background: rgba(7, 12, 7, 0.35);
+        border-radius: var(--radius-lg);
+        background: rgba(8, 10, 18, 0.4);
         padding: 10px 12px;
         max-height: 420px;
         overflow: auto;
@@ -763,26 +741,20 @@ st.markdown(
     .inbox-line{
         display:flex; gap:10px; align-items:flex-start;
         padding: 7px 6px;
-        border-radius: 10px;
-        transition: background 120ms ease, border-color 120ms ease;
+        border-radius: var(--radius);
+        transition: background 140ms ease, border-color 140ms ease;
         border:1px solid transparent;
     }
     .inbox-line:hover{
-        background: rgba(57,255,20,0.06);
+        background: var(--accent-soft);
         border-color: var(--accent-border);
     }
-    .inbox-dot{margin-top:3px; width:10px; height:10px; border-radius:50%; background: var(--accent); box-shadow: 0 0 10px rgba(57,255,20,0.25); flex-shrink:0;}
-    .inbox-dot.urgent{background: var(--danger); box-shadow: 0 0 10px rgba(255,68,68,0.25);}
+    .inbox-dot{margin-top:3px; width:10px; height:10px; border-radius:50%; background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); flex-shrink:0;}
+    .inbox-dot.urgent{background: var(--danger); box-shadow: 0 0 8px rgba(255,92,92,0.3);}
     .inbox-text{font-size:0.82rem; color:var(--text); line-height:1.45; word-break:break-word;}
-    .inbox-empty{padding: 26px 10px; text-align:center; color:var(--muted); opacity:0.75; font-size:0.85rem;}
+    .inbox-empty{padding: 26px 10px; text-align:center; color:var(--muted); opacity:0.65; font-size:0.85rem;}
 
-    section[data-testid="stSidebar"] .sb-link-btn:hover {
-        background: var(--accent-soft);
-        border-color: var(--accent);
-        transform: translateX(2px);
-    }
-
-    /* ── Inbox editor polish ──────────────────────────────────── */
+    /* ── Inbox toolbar ───────────────────────────────────────── */
     .inbox-toolbar {
         display: flex;
         align-items: center;
@@ -796,29 +768,26 @@ st.markdown(
         padding: 4px 12px;
         border: 1px solid var(--accent-border);
         border-radius: 8px;
-        background: rgba(7, 12, 7, 0.4);
+        background: rgba(15, 19, 35, 0.45);
     }
-    .inbox-toolbar .inbox-stat strong {
-        color: var(--accent);
-        font-weight: 700;
-    }
+    .inbox-toolbar .inbox-stat strong { color: var(--accent-bright); font-weight: 700; }
 
-    /* ── Settings section cards ───────────────────────────────── */
+    /* ── Settings cards ──────────────────────────────────────── */
     .settings-section {
         padding: 18px 20px;
-        border-radius: 14px;
+        border-radius: var(--radius-lg);
         background: var(--panel);
         border: 1px solid var(--accent-border);
-        backdrop-filter: blur(10px);
+        backdrop-filter: blur(12px);
         margin-bottom: 16px;
     }
     .settings-section h4 {
         margin: 0 0 10px;
         font-size: 0.95rem;
-        color: var(--accent);
+        color: var(--accent-bright);
     }
 
-    /* ── Inline key-value rows ────────────────────────────────── */
+    /* ── Key-value grid ──────────────────────────────────────── */
     .kv-grid {
         display: grid;
         grid-template-columns: auto 1fr;
@@ -826,19 +795,13 @@ st.markdown(
         font-size: 0.82rem;
         margin: 6px 0 10px;
     }
-    .kv-grid .kv-key {
-        color: var(--muted);
-        white-space: nowrap;
-    }
-    .kv-grid .kv-val {
-        color: var(--text);
-        font-weight: 600;
-    }
-    .kv-grid .kv-val.ok { color: var(--accent); }
+    .kv-grid .kv-key { color: var(--muted); white-space: nowrap; }
+    .kv-grid .kv-val { color: var(--text); font-weight: 600; }
+    .kv-grid .kv-val.ok { color: var(--success); }
     .kv-grid .kv-val.warn { color: var(--warn); }
     .kv-grid .kv-val.error { color: var(--danger); }
 
-    /* ── Compact action bar ───────────────────────────────────── */
+    /* ── Action bar ──────────────────────────────────────────── */
     .action-bar {
         display: flex;
         gap: 8px;
@@ -846,7 +809,7 @@ st.markdown(
         margin: 12px 0;
     }
 
-    /* ── Toast-style feedback ─────────────────────────────────── */
+    /* ── Feedback toast ──────────────────────────────────────── */
     .feedback-toast {
         display: inline-flex;
         align-items: center;
@@ -858,23 +821,19 @@ st.markdown(
         animation: fadeInUp 300ms ease;
     }
     .feedback-toast.success {
-        background: rgba(57, 255, 20, 0.12);
-        border: 1px solid rgba(57, 255, 20, 0.35);
-        color: var(--accent);
+        background: var(--success-soft);
+        border: 1px solid rgba(52, 211, 153, 0.35);
+        color: var(--success);
     }
     @keyframes fadeInUp {
         from { opacity: 0; transform: translateY(6px); }
         to { opacity: 1; transform: translateY(0); }
     }
-    section[data-testid="stSidebar"] .sb-link-btn:hover {
-        background: var(--accent-soft);
-        border-color: var(--accent);
-        transform: translateX(2px);
-    }
     </style>
     """,
     unsafe_allow_html=True,
 )
+_render_flash()
 
 def _page_context(title: str, description: str = "", extra_html: str = "") -> None:
     """Render a consistent page context bar at the top of each tab."""
@@ -916,6 +875,19 @@ def _latest_file(files: Iterable[Path]) -> Path | None:
             latest = p
             latest_ts = dt
     return latest
+
+def _decision_status(p: Path) -> str:
+    decision = read_decision(p)
+    if not decision:
+        return ""
+    return str(decision.get("decision", "")).strip().upper()
+
+def _is_decided(p: Path) -> bool:
+    return _decision_status(p) in ("APPROVE", "REJECT")
+
+def _latest_pending(files: Iterable[Path]) -> Path | None:
+    pending = [p for p in files if not _is_decided(p)]
+    return _latest_file(pending)
 
 def _fmt_time(value: str | datetime | None) -> str:
     if isinstance(value, datetime):
@@ -1198,12 +1170,20 @@ def _render_sidebar() -> None:
                 f'<a class="sb-link-btn" href="{llama_url}" target="_blank" rel="noopener">🦙  Open Llama</a>',
                 unsafe_allow_html=True,
             )
+        marketplace_url = "http://localhost:3000"
+        if hasattr(st, "link_button"):
+            st.link_button("🛒  Marketplace", marketplace_url, use_container_width=True)
+        else:
+            st.markdown(
+                f'<a class="sb-link-btn" href="{marketplace_url}" target="_blank" rel="noopener">🛒  Marketplace</a>',
+                unsafe_allow_html=True,
+            )
         if st.button("📝  Notes", key="sidebar_notes", use_container_width=True):
             st.session_state["_jump_to_notes"] = True
             st.rerun()
         if st.button("⚡  Kick cycle", key="sidebar_kick", use_container_width=True):
             _touch_trigger("sidebar_kick")
-            st.success("Cycle triggered.")
+            _set_flash("success", "Cycle triggered.")
             st.rerun()
 
         # ── Pinned note ─────────────────────────────────────────
@@ -1336,6 +1316,44 @@ def _write_continue_work_override(project: str, project_path: Path) -> Path:
     )
     return override_path
 
+def _project_choices() -> list[str]:
+    root = Path("/home/hackerman/agent-runtime/workspace/projects")
+    if not root.exists():
+        return []
+    projects = [p.name for p in root.iterdir() if p.is_dir()]
+    return sorted(projects)
+
+def _codex_audit_overrides() -> list[Path]:
+    overrides_dir = Path("/home/hackerman/agent-runtime/directives/overrides")
+    if not overrides_dir.exists():
+        return []
+    return sorted(overrides_dir.glob("allow_codex_audit*.md"))
+
+def _set_codex_audit_override(project: str | None) -> Path:
+    overrides_dir = Path("/home/hackerman/agent-runtime/directives/overrides")
+    overrides_dir.mkdir(parents=True, exist_ok=True)
+    for p in _codex_audit_overrides():
+        try:
+            p.unlink()
+        except Exception:
+            pass
+    name = f"allow_codex_audit_{project}.md" if project else "allow_codex_audit.md"
+    path = overrides_dir / name
+    path.write_text(
+        "# Allow Codex Audit\n"
+        f"Project: {project or 'all'}\n"
+        f"Requested at: {datetime.now(timezone.utc).isoformat()}\n",
+        encoding="utf-8",
+    )
+    return path
+
+def _clear_codex_audit_overrides() -> None:
+    for p in _codex_audit_overrides():
+        try:
+            p.unlink()
+        except Exception:
+            pass
+
 def _recent_failures(limit: int = 3) -> list[str]:
     log_path = Path("/home/hackerman/agent-runtime/logs/dashboard_cycle.jsonl")
     if not log_path.exists():
@@ -1387,28 +1405,28 @@ def _copy_button(text: str, key: str) -> None:
     * {{ box-sizing: border-box; }}
     .copy-btn {{
         background:transparent;
-        border:1px solid #39ff14;
-        color:#39ff14;
+        border:1px solid #4f8aff;
+        color:#4f8aff;
         padding:6px 10px;
         border-radius:8px;
         cursor:pointer;
-        box-shadow:0 0 12px rgba(57,255,20,0.6);
+        box-shadow:0 0 12px rgba(79,138,255,0.6);
         transition: all 120ms ease;
         font-weight:600;
     }}
     .copy-btn:active {{
         transform: scale(0.96);
-        box-shadow:0 0 20px rgba(57,255,20,0.9);
+        box-shadow:0 0 20px rgba(79,138,255,0.9);
     }}
     .copy-btn.copied {{
-        color:#0b0f0b;
-        background:#39ff14;
-        box-shadow:0 0 20px rgba(57,255,20,0.9);
+        color:#0b0e17;
+        background:#4f8aff;
+        box-shadow:0 0 20px rgba(79,138,255,0.9);
     }}
     .copy-badge {{
         margin-left:8px;
         font-size:0.7rem;
-        color:#39ff14;
+        color:#4f8aff;
         opacity:0;
         transition: opacity 120ms ease;
     }}
@@ -1445,34 +1463,34 @@ def _failure_row(text: str, key: str) -> None:
     .row {{ display:flex; gap:12px; align-items:flex-start; }}
     .card {{
         flex:1;
-        border:1px solid rgba(57,255,20,0.25);
-        background:rgba(0,0,0,0.35);
+        border:1px solid rgba(79,138,255,0.25);
+        background:rgba(15,19,35,0.5);
         border-radius:12px;
         padding:10px 12px;
         box-shadow:0 4px 16px rgba(0,0,0,0.35);
     }}
     .copy {{
         min-width:34px; height:34px; display:flex; align-items:center; justify-content:center;
-        border:1px solid #39ff14; color:#39ff14; border-radius:8px; cursor:pointer;
-        box-shadow:0 0 12px rgba(57,255,20,0.6); background:transparent;
+        border:1px solid #4f8aff; color:#4f8aff; border-radius:8px; cursor:pointer;
+        box-shadow:0 0 12px rgba(79,138,255,0.6); background:transparent;
         font-weight:600;
     }}
     .copy.copied {{
-        color:#0b0f0b;
-        background:#39ff14;
-        box-shadow:0 0 20px rgba(57,255,20,0.9);
+        color:#0b0e17;
+        background:#4f8aff;
+        box-shadow:0 0 20px rgba(79,138,255,0.9);
     }}
     .copy-badge {{
         margin-top:6px;
         font-size:0.7rem;
-        color:#39ff14;
+        color:#4f8aff;
         opacity:0;
         transition: opacity 120ms ease;
     }}
     pre {{
         margin:0;
         background:transparent;
-        color:#eaffea; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        color:#e8ecf4; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
         white-space:pre-wrap; word-break:break-word; max-height:72px; overflow:hidden;
     }}
     </style>
@@ -1681,19 +1699,246 @@ def _edge_from_text(payload: dict) -> str:
         return "Trustworthy reporting and visibility."
     return "Clear scope + rapid iteration."
 
+def _proposal_text(payload: dict) -> str:
+    return str(payload.get("proposal_text") or payload.get("proposal") or "").strip()
+
+def _template_section(text: str, label: str) -> str:
+    if not text:
+        return ""
+    lower = text.lower()
+    label_lower = label.lower()
+    idx = lower.find(label_lower)
+    if idx == -1:
+        return ""
+    start = idx + len(label_lower)
+    m = re.search(r"\n\d+\)\s", text[start:], re.IGNORECASE)
+    end = start + m.start() if m else len(text)
+    return text[start:end].strip()
+
+def _template_bullets(text: str, label: str) -> list[str]:
+    block = _template_section(text, label)
+    return [ln.strip()[2:].strip() for ln in block.splitlines() if ln.strip().startswith("- ")]
+
+def _cover_fields(text: str) -> dict[str, str]:
+    cover = _template_section(text, "0) COVER")
+    fields = {}
+    for line in cover.splitlines():
+        if ":" in line:
+            key, val = line.split(":", 1)
+            fields[key.strip("- ").strip()] = val.strip()
+    return fields
+
+def _stack_summary(payload: dict) -> str:
+    stack = payload.get("stack_summary") if isinstance(payload, dict) else None
+    if not isinstance(stack, dict):
+        return "—"
+    parts = []
+    for label, key in [("Languages", "languages"), ("Frameworks", "frameworks"), ("Data", "data"), ("Infra", "infra")]:
+        vals = stack.get(key) or []
+        if isinstance(vals, list) and vals:
+            parts.append(f"{label}: {', '.join([str(v) for v in vals])}")
+    return " · ".join(parts) if parts else "—"
+
 
 def _investor_synopsis(payload: dict) -> dict[str, str]:
     summary = str(payload.get("summary") or "").strip()
+    proposal_text = _proposal_text(payload)
+    exec_block = _template_section(proposal_text, "1) EXECUTIVE SUMMARY (HUMAN READ)") or _template_section(proposal_text, "1) EXECUTIVE SUMMARY")
+    exec_lines = [ln.strip() for ln in exec_block.splitlines() if ln.strip().startswith("- ")]
+    exec_map = {}
+    for line in exec_lines:
+        if ":" in line:
+            key, val = line[2:].split(":", 1)
+            exec_map[key.strip().lower()] = val.strip()
     context = str(payload.get("context") or "").strip()
     reasoning = str(payload.get("reasoning") or "").strip()
     actions = _as_list(payload.get("suggested_actions"))
+    stack_note = _stack_summary(payload)
     return {
-        "what": summary or _first_sentence(context),
-        "why": _first_sentence(reasoning) or _first_sentence(context),
-        "edge": _edge_from_text(payload),
+        "what": exec_map.get("what we’re building") or exec_map.get("what we're building") or summary or _first_sentence(context),
+        "why": exec_map.get("expected outcome") or _first_sentence(reasoning) or _first_sentence(context),
+        "edge": exec_map.get("why it wins (differentiator)") or _edge_from_text(payload),
         "next": actions[0] if actions else "Review proposal details.",
-        "tech": _tech_notes(payload),
+        "tech": stack_note or _tech_notes(payload),
     }
+
+def _design_snapshot(proposal_text: str) -> dict[str, str]:
+    if not proposal_text:
+        return {}
+    block = _template_section(proposal_text, "6) DESIGN STRATEGY (UNIQUE PER PROJECT: PSYCHOLOGY + TECH-DRIVEN)")
+    if not block:
+        block = _template_section(proposal_text, "6) DESIGN STRATEGY")
+    if not block:
+        return {}
+    lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+    thesis = ""
+    identity = []
+    in_identity = False
+    for i, ln in enumerate(lines):
+        if ln.lower().startswith("design thesis"):
+            # grab the next bullet line
+            for nxt in lines[i + 1 :]:
+                if nxt.startswith("- "):
+                    thesis = nxt[2:].strip()
+                    break
+        if ln.lower().startswith("visual identity direction"):
+            in_identity = True
+            continue
+        if in_identity:
+            if ln.lower().startswith("interaction patterns"):
+                in_identity = False
+                continue
+            if ln.startswith("- "):
+                identity.append(ln[2:].strip())
+    return {
+        "thesis": thesis,
+        "identity": " · ".join(identity) if identity else "",
+    }
+
+def _project_status_summary(project_path: Path) -> tuple[str, str]:
+    status_path = project_path / "status.json"
+    done_path = project_path / "DONE.md"
+    work_order = project_path / "WORK_ORDER.md"
+    if status_path.exists():
+        try:
+            data = json.loads(status_path.read_text(encoding="utf-8"))
+            status = str(data.get("status") or "UNKNOWN")
+            reason = str(data.get("reason") or "")
+            return status, reason
+        except Exception:
+            return "UNKNOWN", "status.json unreadable"
+    if done_path.exists():
+        return "DONE", "DONE.md present"
+    if work_order.exists():
+        return "IN_PROGRESS", "work order present"
+    return "UNKNOWN", "no status file"
+
+def _project_last_activity(project_name: str, project_path: Path) -> datetime | None:
+    candidates = [
+        project_path / "status.json",
+        project_path / "WORK_ORDER.md",
+        project_path / "DONE.md",
+        project_path / "CHANGELOG.md",
+        project_path / "README.md",
+    ]
+    log_path = Path("/home/hackerman/agent-runtime/logs") / f"{project_name}_cycle.jsonl"
+    if log_path.exists():
+        candidates.append(log_path)
+    latest = None
+    for p in candidates:
+        if not p.exists():
+            continue
+        try:
+            ts = p.stat().st_mtime
+        except Exception:
+            continue
+        if latest is None or ts > latest:
+            latest = ts
+    if latest is None:
+        return None
+    return datetime.fromtimestamp(latest, tz=timezone.utc)
+
+def _list_projects_overview() -> list[dict]:
+    root = Path("/home/hackerman/agent-runtime/workspace/projects")
+    if not root.exists():
+        return []
+    items = []
+    for p in sorted([d for d in root.iterdir() if d.is_dir()]):
+        status, reason = _project_status_summary(p)
+        last_dt = _project_last_activity(p.name, p)
+        items.append({
+            "name": p.name,
+            "path": str(p),
+            "status": status,
+            "reason": reason,
+            "last": last_dt,
+        })
+    return items
+
+def _project_status_detail(project_path: Path) -> tuple[str, str, str]:
+    status_path = project_path / "status.json"
+    done_path = project_path / "DONE.md"
+    work_order = project_path / "WORK_ORDER.md"
+    if status_path.exists():
+        try:
+            data = json.loads(status_path.read_text(encoding="utf-8"))
+            status = str(data.get("status") or "UNKNOWN")
+            reason = str(data.get("reason") or "")
+            ts = str(data.get("timestamp") or "")
+            return status, reason, ts
+        except Exception:
+            return "UNKNOWN", "status.json unreadable", ""
+    if done_path.exists():
+        return "DONE", "DONE.md present", ""
+    if work_order.exists():
+        return "IN_PROGRESS", "work order present", ""
+    return "UNKNOWN", "no status file", ""
+
+def _project_agent_hint(project_path: Path) -> str:
+    routing = project_path / "routing.json"
+    if routing.exists():
+        try:
+            data = json.loads(routing.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+        provider = str(data.get("force_provider") or "").strip().lower()
+        if provider == "openai":
+            return f"OpenAI · {data.get('openai_model') or 'model'}"
+        if provider == "claude":
+            return f"Claude · {data.get('claude_model') or 'model'}"
+        if provider == "codex":
+            return f"Codex · {data.get('codex_model') or 'model'}"
+        if provider:
+            return provider
+    provider, model = _active_provider_model()
+    if provider and model:
+        return f"{provider.upper()} · {model}"
+    return "—"
+
+def _mark_project_done(project_path: Path) -> None:
+    status_path = project_path / "status.json"
+    done_path = project_path / "DONE.md"
+    if not done_path.exists():
+        done_path.write_text(
+            "# DONE\n"
+            f"Marked done at {datetime.now(timezone.utc).isoformat()}\n",
+            encoding="utf-8",
+        )
+    status_path.write_text(
+        json.dumps({"status": "DONE", "timestamp": datetime.now(timezone.utc).isoformat()}, indent=2),
+        encoding="utf-8",
+    )
+
+def _continue_project_work(project: str, project_path: Path) -> None:
+    status_path = project_path / "status.json"
+    done_path = project_path / "DONE.md"
+    if done_path.exists():
+        try:
+            done_path.unlink()
+        except Exception:
+            pass
+    status_path.write_text(
+        json.dumps({"status": "IN_PROGRESS", "timestamp": datetime.now(timezone.utc).isoformat(), "reason": "continue_work"}, indent=2),
+        encoding="utf-8",
+    )
+    _write_continue_work_override(project, project_path)
+    _touch_trigger("continue_work")
+
+def _pick_active_project(projects: list[dict]) -> dict | None:
+    if not projects:
+        return None
+    def _latest(items: list[dict]) -> dict | None:
+        return sorted(items, key=lambda p: p.get("last") or datetime.fromtimestamp(0, tz=timezone.utc), reverse=True)[0] if items else None
+    active = _latest([p for p in projects if p.get("status") == "IN_PROGRESS"])
+    if active:
+        return active
+    pending = _latest([p for p in projects if p.get("status") == "PENDING_HUMAN_REVIEW"])
+    if pending:
+        return pending
+    error = _latest([p for p in projects if p.get("status") == "ERROR"])
+    if error:
+        return error
+    return _latest(projects)
 
 
 def _http_probe(url: str, expect_json_status: bool = False, timeout: int = 2) -> tuple[str, str]:
@@ -1875,12 +2120,147 @@ with tabs[0]:
         unsafe_allow_html=True,
     )
 
+    # ── Governor & Budget ──────────────────────────────────────
+    st.markdown('<div class="section-header">🛡️ Governor & Budget</div>', unsafe_allow_html=True)
+    try:
+        import sys as _sys
+        _gov_base = str(Path("/home/hackerman/agent-runtime"))
+        if _gov_base not in _sys.path:
+            _sys.path.insert(0, _gov_base)
+        from governor.governor import Governor
+        from governor.budget_tracker import BudgetTracker
+
+        _gov = Governor()
+        _gov_status = _gov.status()
+        _bt = BudgetTracker()
+        _bt_summary = _bt.summary()
+
+        _gov_calls = _gov_status.get("daily_calls", 0)
+        _gov_calls_max = _gov_status.get("daily_calls_max", 50)
+        _gov_cost = _gov_status.get("daily_cost_usd", 0.0)
+        _gov_cost_max = _gov_status.get("daily_cost_max", 10.0)
+        _gov_mode = _gov_status.get("mode", "?")
+        _gov_call_pct = (_gov_calls / _gov_calls_max * 100) if _gov_calls_max > 0 else 0
+        _gov_cost_pct = (_gov_cost / _gov_cost_max * 100) if _gov_cost_max > 0 else 0
+        _gov_call_variant = "ok" if _gov_call_pct < 70 else ("warn" if _gov_call_pct < 90 else "error")
+        _gov_cost_variant = "ok" if _gov_cost_pct < 70 else ("warn" if _gov_cost_pct < 90 else "error")
+
+        _bt_costs_today = _bt_summary.get("costs", {}).get("today", 0.0)
+        _bt_costs_week = _bt_summary.get("costs", {}).get("this_week", 0.0)
+        _bt_costs_all = _bt_summary.get("costs", {}).get("all_time", 0.0)
+        _bt_revenue_all = _bt_summary.get("revenue", {}).get("all_time", 0.0)
+        _bt_net = _bt_summary.get("net_position", 0.0)
+        _bt_self_fund = _bt_summary.get("self_funding", False)
+        _bt_net_variant = "ok" if _bt_net >= 0 else "warn"
+
+        _by_provider = _bt_summary.get("costs_by_provider", {})
+        _provider_chips = " ".join(
+            f'<span style="font-size:0.72rem; color:var(--muted); margin-right:8px;">{p}: ${c:.2f}</span>'
+            for p, c in sorted(_by_provider.items(), key=lambda x: -x[1])
+        ) if _by_provider else '<span style="font-size:0.72rem; color:var(--muted);">No API costs recorded yet</span>'
+
+        st.markdown(
+            f"""
+            <div class="glass-grid">
+                <div class="glass-card">
+                    <div class="glass-title">Governor</div>
+                    <div class="glass-meta">
+                        Mode: <strong>{_gov_mode}</strong><br>
+                        API calls: <strong>{_gov_calls}</strong> / {_gov_calls_max}
+                        {_chip(f'{_gov_call_pct:.0f}%', _gov_call_variant)}<br>
+                        Cost: <strong>${_gov_cost:.2f}</strong> / ${_gov_cost_max:.2f}
+                        {_chip(f'{_gov_cost_pct:.0f}%', _gov_cost_variant)}
+                    </div>
+                </div>
+                <div class="glass-card">
+                    <div class="glass-title">Budget Tracker</div>
+                    <div class="glass-meta">
+                        Today: <strong>${_bt_costs_today:.2f}</strong> ·
+                        Week: <strong>${_bt_costs_week:.2f}</strong> ·
+                        All-time: <strong>${_bt_costs_all:.2f}</strong><br>
+                        Revenue: <strong>${_bt_revenue_all:.2f}</strong> ·
+                        Net: {_chip(f'${_bt_net:+.2f}', _bt_net_variant)}<br>
+                        Self-funding: <strong>{'Yes' if _bt_self_fund else 'Not yet'}</strong>
+                    </div>
+                </div>
+                <div class="glass-card">
+                    <div class="glass-title">By Provider</div>
+                    <div class="glass-meta">{_provider_chips}</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    except Exception as _gov_err:
+        st.caption(f"Governor/Budget not available: {_gov_err}")
+
+    st.markdown('<div class="section-header">🟢 Active Work</div>', unsafe_allow_html=True)
+    _projects = _list_projects_overview()
+    _active = _pick_active_project(_projects)
+    if not _active:
+        st.caption("No projects found yet.")
+    else:
+        _active_path = Path(_active["path"])
+        _a_status, _a_reason, _a_ts = _project_status_detail(_active_path)
+        _a_agent = _project_agent_hint(_active_path)
+        _a_last = _fmt_time(_active.get("last")) if _active.get("last") else "—"
+        _a_live = "Live" if _a_status == "IN_PROGRESS" else "Idle"
+        if _a_ts:
+            try:
+                _dt = datetime.fromisoformat(_a_ts.replace("Z", "+00:00"))
+                _age_min = (datetime.now(timezone.utc) - _dt).total_seconds() / 60.0
+                if _a_status == "IN_PROGRESS":
+                    _a_live = "Live" if _age_min <= 20 else "Stale"
+            except Exception:
+                pass
+        if _a_status == "IN_PROGRESS":
+            _variant = "ok"
+        elif _a_status == "PENDING_HUMAN_REVIEW":
+            _variant = "warn"
+        elif _a_status == "ERROR":
+            _variant = "error"
+        elif _a_status == "DONE":
+            _variant = "ok"
+        else:
+            _variant = "neutral"
+        _work_order = _active_path / "WORK_ORDER.md"
+        _work_order_note = "Work order present" if _work_order.exists() else "No work order"
+        st.markdown(
+            f"""
+            <div class="glass-card">
+                <div class="card-title-row">
+                    <div class="title">{_html.escape(_active["name"])}</div>
+                    <div class="meta">{_html.escape(_a_last)}</div>
+                </div>
+                <div class="glass-meta">Agent: {_html.escape(_a_agent)} · {_html.escape(_a_live)} · {_html.escape(_work_order_note)}</div>
+                <div style="margin-top:8px;">{_chip('Status: ' + _a_status, _variant)}</div>
+                <div class="subtle" style="margin-top:6px;">{_html.escape(_a_reason or '—')}</div>
+                <div class="glass-meta" style="margin-top:6px;">Path: {_html.escape(_active["path"])}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if _a_status == "PENDING_HUMAN_REVIEW":
+            st.markdown("**Final review**")
+            c_done, c_cont = st.columns(2)
+            with c_done:
+                if st.button("Approve DONE", key="active_done", use_container_width=True):
+                    _mark_project_done(_active_path)
+                    st.success("Marked DONE.")
+                    st.rerun()
+            with c_cont:
+                if st.button("Continue work", key="active_continue", use_container_width=True):
+                    _continue_project_work(_active["name"], _active_path)
+                    st.warning("Set to IN_PROGRESS and queued a new cycle.")
+                    st.rerun()
+        st.caption("See the Projects tab for the full project list.")
+
     # Latest proposal quick-approval
     st.markdown('<div class="section-header">🧾 Latest Proposal</div>', unsafe_allow_html=True)
     _ov_proposals = [p for p in _ov_all_files if not p.name.startswith("review_")]
-    _ov_latest_proposal = _latest_file(_ov_proposals)
+    _ov_latest_proposal = _latest_pending(_ov_proposals)
     if not _ov_latest_proposal:
-        st.caption("No proposals available yet.")
+        st.caption("No pending proposals available yet.")
     else:
         try:
             _ov_payload = read_json_file(_ov_latest_proposal)
@@ -1889,10 +2269,12 @@ with tabs[0]:
         _ov_decision = read_decision(_ov_latest_proposal)
         _ov_summary = str(_ov_payload.get("summary") or "").strip()
         _ov_context = str(_ov_payload.get("context") or "").strip()
-        _ov_overview = _ov_payload.get("overview")
-        _ov_proj_summary = _ov_payload.get("project_summary")
-        _ov_tech = _ov_payload.get("tech_details")
-        _ov_done = _ov_payload.get("definition_of_done")
+        _ov_text = _proposal_text(_ov_payload)
+        _ov_cover = _cover_fields(_ov_text)
+        _ov_exec = _template_bullets(_ov_text, "1) EXECUTIVE SUMMARY (HUMAN READ)") or _template_bullets(_ov_text, "1) EXECUTIVE SUMMARY")
+        _ov_core = _as_list(_ov_payload.get("core_mechanics"))
+        _ov_stack = _stack_summary(_ov_payload)
+        _ov_design = _design_snapshot(_ov_text)
         _ov_project = str(_ov_payload.get("project") or "").strip()
         _ov_id = str(_ov_payload.get("proposal_id") or _ov_latest_proposal.stem)
         _ov_mode = str(_ov_payload.get("mode") or "—")
@@ -1904,13 +2286,13 @@ with tabs[0]:
         with left:
             st.markdown(
                 f"""
-                <div class="glass-card">
-                    <div class="card-title-row">
+                    <div class="glass-card">
+                        <div class="card-title-row">
                         <div class="title">{_html.escape(_ov_summary) if _ov_summary else 'Latest proposal'}</div>
                         <div class="meta">{_html.escape(_ov_time)}</div>
                     </div>
                     <div class="glass-meta">ID: {_html.escape(_ov_id)} · Mode: {_html.escape(_ov_mode)} · Project: {_html.escape(_ov_project or '—')}</div>
-                    <div class="subtle" style="margin-top:8px; white-space:pre-wrap;">{_html.escape(str(_ov_overview or _ov_context or '—'))}</div>
+                    <div class="subtle" style="margin-top:8px; white-space:pre-wrap;">{_html.escape(str((_ov_cover.get('One-liner') if isinstance(_ov_cover, dict) else '') or _ov_summary or _ov_context or '—'))}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -1927,16 +2309,40 @@ with tabs[0]:
                     ]
                 )
             )
-            st.markdown("**Project summary**")
-            st.caption(str(_ov_proj_summary or "—"))
-            st.markdown("**Tech details**")
-            st.caption(str(_ov_tech or "—"))
-            st.markdown("**Definition of Done**")
-            _ov_done_list = _as_list(_ov_done)
-            if _ov_done_list:
-                st.markdown("\n".join([f"- {item}" for item in _ov_done_list]))
+            st.markdown("**Cover essentials**")
+            if _ov_cover:
+                st.markdown(
+                    "\n".join(
+                        [
+                            f"- **Project Name:** {_ov_cover.get('Project Name','—')}",
+                            f"- **Status:** {_ov_cover.get('Status','—')}",
+                            f"- **Primary KPI:** {_ov_cover.get('Primary KPI','—')}",
+                            f"- **Target Launch Window:** {_ov_cover.get('Target Launch Window','—')}",
+                        ]
+                    )
+                )
             else:
                 st.caption("—")
+            st.markdown("**Executive summary**")
+            if _ov_exec:
+                st.markdown("\n".join([f"- {item}" for item in _ov_exec]))
+            else:
+                st.caption("—")
+            st.markdown("**Design & visual**")
+            if _ov_design and (_ov_design.get("thesis") or _ov_design.get("identity")):
+                if _ov_design.get("thesis"):
+                    st.markdown(f"- **Design thesis:** {_ov_design.get('thesis')}")
+                if _ov_design.get("identity"):
+                    st.markdown(f"- **Visual identity:** {_ov_design.get('identity')}")
+            else:
+                st.caption("—")
+            st.markdown("**Core mechanics**")
+            if _ov_core:
+                st.markdown("\n".join([f"- {item}" for item in _ov_core]))
+            else:
+                st.caption("—")
+            st.markdown("**Stack summary**")
+            st.caption(_ov_stack or "—")
             if _ov_decision:
                 st.caption(f"Decision: {_ov_decision.get('decision','—')} · {_ov_decision.get('timestamp','—')}")
         with right:
@@ -1949,30 +2355,38 @@ with tabs[0]:
             c1, c2 = st.columns(2)
             with c1:
                 if st.button("Approve", key=f"ov_approve_{_ov_latest_proposal.name}"):
-                    priority_path = write_priority_from_proposal(_ov_latest_proposal, _ov_payload, _note)
-                    write_decision(
-                        _ov_latest_proposal,
-                        "APPROVE",
-                        note=_note,
-                        extra={"priority_path": str(priority_path)},
-                    )
-                    if _gate_on:
-                        trigger_run()
-                        st.success(f"Approved and queued. Priority saved to {priority_path}.")
-                    else:
-                        st.success(f"Approved. Draft priority saved to {priority_path}.")
-                    st.rerun()
+                    try:
+                        priority_path = write_priority_from_proposal(_ov_latest_proposal, _ov_payload, _note)
+                        decision_path = write_decision(
+                            _ov_latest_proposal,
+                            "APPROVE",
+                            note=_note,
+                            extra={"priority_path": str(priority_path)},
+                        )
+                        if not priority_path.exists():
+                            raise RuntimeError("Priority file not created.")
+                        if not decision_path.exists():
+                            raise RuntimeError("Decision file not created.")
+                        if _gate_on:
+                            trigger_run()
+                            _set_flash("success", f"Approved and queued. Priority saved to {priority_path}.")
+                        else:
+                            _set_flash("success", f"Approved. Draft priority saved to {priority_path}.")
+                        st.rerun()
+                    except Exception as exc:
+                        _set_flash("error", f"Approval failed: {exc}")
+                        st.rerun()
             with c2:
                 if st.button("Reject", key=f"ov_reject_{_ov_latest_proposal.name}"):
                     write_decision(_ov_latest_proposal, "REJECT", note=_note)
-                    st.warning("Rejected. Decision recorded.")
+                    _set_flash("warning", "Rejected. Decision recorded.")
                     st.rerun()
 
             if (not _gate_on) and _ov_decision and _ov_decision.get("priority_path"):
                 if st.button("Promote to active", key=f"ov_promote_{_ov_latest_proposal.name}"):
                     promoted = promote_priority(Path(_ov_decision["priority_path"]))
                     trigger_run()
-                    st.success(f"Promoted to active priority: {promoted}")
+                    _set_flash("success", f"Promoted to active priority: {promoted}")
                     st.rerun()
 
     # Two-column: Activity feed + Failures
@@ -2291,10 +2705,19 @@ with tabs[1]:
         return []
 
     def _project_file_count(p: Path) -> int:
+        _skip = {"node_modules", ".git", ".next", "__pycache__", ".venv", "venv"}
+        count = 0
         try:
-            return sum(1 for f in p.rglob("*") if f.is_file() and not f.name.startswith("."))
+            for item in p.iterdir():
+                if item.name in _skip:
+                    continue
+                if item.is_file() and not item.name.startswith("."):
+                    count += 1
+                elif item.is_dir():
+                    count += sum(1 for f in item.rglob("*") if f.is_file() and not any(s in f.parts for s in _skip))
         except Exception:
-            return 0
+            pass
+        return count
 
     def _recent_updates_projects() -> list[dict]:
         items = []
@@ -2336,6 +2759,24 @@ with tabs[1]:
             unsafe_allow_html=True,
         )
 
+        if _proj_review:
+            st.markdown("**Reviews needed**")
+            for p in _proj_review:
+                status, reason, ts = _project_status_detail(p)
+                ts_str = _fmt_time(ts) if ts else _fmt_mtime(p)
+                st.markdown(f"- **{p.name}** · {_html.escape(reason or 'needs decision')} · {ts_str}")
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button(f"Approve DONE · {p.name}", key=f"proj_done_{p.name}"):
+                        _mark_project_done(p)
+                        st.success(f"Marked {p.name} DONE.")
+                        st.rerun()
+                with c2:
+                    if st.button(f"Continue work · {p.name}", key=f"proj_continue_{p.name}"):
+                        _continue_project_work(p.name, p)
+                        st.warning(f"Set {p.name} to IN_PROGRESS.")
+                        st.rerun()
+
         # Filter / sort controls
         _proj_filter_cols = st.columns([2, 2, 1])
         with _proj_filter_cols[0]:
@@ -2365,31 +2806,31 @@ with tabs[1]:
         if not _proj_filtered:
             st.caption("No projects match your filters.")
         else:
-            # Project cards as glass cards
-            _proj_cards_html = []
+            # Project cards as glass cards — render each individually to avoid truncation
             for p in _proj_filtered[:12]:
                 status, ts = _project_status_fn(p)
                 file_count = _project_file_count(p)
                 has_done = (p / "DONE.md").exists()
                 has_changelog = (p / "CHANGELOG.md").exists()
+                _preview = _preview_url(p) if hasattr(p, 'name') else None
 
                 status_variant = "ok" if status == "IN_PROGRESS" else ("warn" if status == "PENDING_HUMAN_REVIEW" else ("ok" if status == "DONE" else "neutral"))
                 status_icon = {"IN_PROGRESS": "🔄", "DONE": "✅", "PENDING_HUMAN_REVIEW": "⏳"}.get(status, "❓")
-                badges = f'<span class="status-chip {status_variant}">{status_icon} {status}</span>'
+                badges = f'<span class="status-chip {status_variant}">{status_icon} {_html.escape(status)}</span>'
                 if has_done:
                     badges += ' <span class="status-chip ok">📋 DONE.md</span>'
+                _ts_display = _html.escape(_fmt_time(ts) if ts else _fmt_mtime(p))
+                _preview_link = f' · <a href="{_html.escape(str(_preview))}" target="_blank" style="color:var(--accent);">Preview →</a>' if _preview else ''
 
-                _proj_cards_html.append(
-                    f"""
-                    <div class="glass-card">
-                        <div class="glass-title" style="font-size:1.05rem;">{p.name}</div>
+                st.markdown(
+                    f"""<div class="glass-card" style="margin-bottom:12px;">
+                        <div class="glass-title" style="font-size:1.05rem;">{_html.escape(p.name)}</div>
                         <div style="margin:6px 0 8px;">{badges}</div>
-                        <div class="glass-meta">Updated: {_fmt_time(ts) if ts else _fmt_mtime(p)}</div>
+                        <div class="glass-meta">Updated: {_ts_display}{_preview_link}</div>
                         <div class="glass-meta">{file_count} files{'  ·  has changelog' if has_changelog else ''}</div>
-                    </div>
-                    """
+                    </div>""",
+                    unsafe_allow_html=True,
                 )
-            st.markdown(f'<div class="glass-grid">{"".join(_proj_cards_html)}</div>', unsafe_allow_html=True)
 
             # Expandable detail for each project
             st.markdown('<div class="section-header">📋 Project Details</div>', unsafe_allow_html=True)
@@ -2459,6 +2900,8 @@ with tabs[2]:
     _inbox_edit_col, _inbox_side_col = st.columns([2, 1], gap="large")
 
     with _inbox_edit_col:
+        if st.session_state.get("_inbox_cleanup_pending") is not None:
+            st.session_state["inbox_editor"] = st.session_state.pop("_inbox_cleanup_pending")
         st.markdown(
             f"""
             <div class="inbox-shell">
@@ -2495,7 +2938,7 @@ with tabs[2]:
         with _inbox_btn_cols[2]:
             if st.button("🧹 Clean up whitespace", key="cleanup_inbox", use_container_width=True):
                 cleaned = "\n".join([ln.rstrip() for ln in inbox.splitlines()]).strip() + ("\n" if inbox.strip() else "")
-                st.session_state["inbox_editor"] = cleaned
+                st.session_state["_inbox_cleanup_pending"] = cleaned
                 st.rerun()
 
     with _inbox_side_col:
@@ -2589,8 +3032,16 @@ with tabs[3]:
     query = st.text_input("Search", help="Filter by filename...")
     sort_order = st.selectbox("Sort by", ["Newest first", "Oldest first", "Filename A→Z"])
     max_items = st.slider("Max items", min_value=5, max_value=100, value=20, step=5)
+    show_decided = st.checkbox("Show decided proposals", value=True)
 
-    filtered = [p for p in all_files if query.lower() in p.name.lower()] if query else all_files
+    def _filter_decided(items: list[Path]) -> list[Path]:
+        if show_decided:
+            return items
+        return [p for p in items if p.name.startswith("review_") or not _is_decided(p)]
+
+    filtered = [p for p in all_files if query.lower() in p.name.lower()] if query else list(all_files)
+    filtered = _filter_decided(filtered)
+    visible_all = _filter_decided(list(all_files))
 
     if not filtered:
         st.markdown(
@@ -2601,9 +3052,9 @@ with tabs[3]:
             unsafe_allow_html=True,
         )
     else:
-        claude_files = [p for p in all_files if p.name.startswith("claude_")]
-        review_files = [p for p in all_files if p.name.startswith("review_")]
-        latest_any = _latest_file(all_files)
+        claude_files = [p for p in visible_all if p.name.startswith("claude_")]
+        review_files = [p for p in visible_all if p.name.startswith("review_")]
+        latest_any = _latest_file(visible_all)
         latest_review = _latest_file(review_files)
 
         if sort_order == "Oldest first":
@@ -2618,7 +3069,7 @@ with tabs[3]:
         with left_col:
             st.markdown("**Library overview**")
             stats_cols = st.columns(3)
-            stats_cols[0].metric("Total", len(all_files))
+            stats_cols[0].metric("Total", len(visible_all))
             stats_cols[1].metric("Claude", len(claude_files))
             stats_cols[2].metric("Reviews", len(review_files))
             st.caption(f"Latest activity: {_fmt_time(stat_mtime_iso(latest_any)) if latest_any else '—'} · Latest review: {_fmt_time(stat_mtime_iso(latest_review)) if latest_review else '—'}")
@@ -2723,22 +3174,27 @@ with tabs[3]:
                         st.write(payload.get("summary") or "—")
                         if payload.get("project"):
                             st.caption(f"Project: {payload.get('project')}")
-                        if payload.get("overview"):
-                            st.markdown("**Overview**")
-                            st.caption(payload.get("overview") or "—")
-                        if payload.get("project_summary"):
-                            st.markdown("**Project summary**")
-                            st.caption(payload.get("project_summary") or "—")
-                        if payload.get("tech_details"):
-                            st.markdown("**Tech details**")
-                            st.caption(payload.get("tech_details") or "—")
-                        if payload.get("definition_of_done"):
-                            st.markdown("**Definition of Done**")
-                            done_items = _as_list(payload.get("definition_of_done"))
-                            if done_items:
-                                st.markdown("\n".join([f"- {item}" for item in done_items]))
-                            else:
-                                st.caption("—")
+                        proposal_text = _proposal_text(payload)
+                        if proposal_text:
+                            st.markdown("**Proposal Template (v1)**")
+                            st.text(proposal_text)
+                        else:
+                            if payload.get("overview"):
+                                st.markdown("**Overview**")
+                                st.caption(payload.get("overview") or "—")
+                            if payload.get("project_summary"):
+                                st.markdown("**Project summary**")
+                                st.caption(payload.get("project_summary") or "—")
+                            if payload.get("tech_details"):
+                                st.markdown("**Tech details**")
+                                st.caption(payload.get("tech_details") or "—")
+                            if payload.get("definition_of_done"):
+                                st.markdown("**Definition of Done**")
+                                done_items = _as_list(payload.get("definition_of_done"))
+                                if done_items:
+                                    st.markdown("\n".join([f"- {item}" for item in done_items]))
+                                else:
+                                    st.caption("—")
                         if payload.get("context"):
                             st.markdown("**Context**")
                             st.caption(payload.get("context") or "—")
@@ -2775,30 +3231,38 @@ with tabs[3]:
                         btn_cols = st.columns(3)
                         with btn_cols[0]:
                             if st.button("Approve proposal", key=f"approve_{p.name}"):
-                                priority_path = write_priority_from_proposal(p, payload, note)
-                                write_decision(
-                                    p,
-                                    "APPROVE",
-                                    note=note,
-                                    extra={"priority_path": str(priority_path)},
-                                )
-                                if _gate_on:
-                                    trigger_run()
-                                    st.success(f"Approved and queued. Priority saved to {priority_path}.")
-                                else:
-                                    st.success(f"Approved. Draft priority saved to {priority_path}.")
-                                st.rerun()
+                                try:
+                                    priority_path = write_priority_from_proposal(p, payload, note)
+                                    decision_path = write_decision(
+                                        p,
+                                        "APPROVE",
+                                        note=note,
+                                        extra={"priority_path": str(priority_path)},
+                                    )
+                                    if not priority_path.exists():
+                                        raise RuntimeError("Priority file not created.")
+                                    if not decision_path.exists():
+                                        raise RuntimeError("Decision file not created.")
+                                    if _gate_on:
+                                        trigger_run()
+                                        _set_flash("success", f"Approved and queued. Priority saved to {priority_path}.")
+                                    else:
+                                        _set_flash("success", f"Approved. Draft priority saved to {priority_path}.")
+                                    st.rerun()
+                                except Exception as exc:
+                                    _set_flash("error", f"Approval failed: {exc}")
+                                    st.rerun()
                         with btn_cols[1]:
                             if st.button("Reject proposal", key=f"reject_{p.name}"):
                                 write_decision(p, "REJECT", note=note)
-                                st.warning("Rejected. Decision recorded.")
+                                _set_flash("warning", "Rejected. Decision recorded.")
                                 st.rerun()
                         with btn_cols[2]:
                             if (not _gate_on) and decision and decision.get("priority_path"):
                                 if st.button("Promote to active", key=f"promote_{p.name}"):
                                     promoted = promote_priority(Path(decision["priority_path"]))
                                     trigger_run()
-                                    st.success(f"Promoted to active priority: {promoted}")
+                                    _set_flash("success", f"Promoted to active priority: {promoted}")
                                     st.rerun()
 
                     st.json(payload)
@@ -2992,6 +3456,35 @@ with tabs[5]:
                         st.error(f"Test failed: {e}")
 
         st.markdown("")  # spacer
+
+        # ── Final Codex Audit ───────────────────────────────────
+        st.markdown(
+            '<div class="settings-section">'
+            '<h4>🧪 Final Codex Audit</h4>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        audit_overrides = _codex_audit_overrides()
+        if audit_overrides:
+            st.caption("Active override: " + ", ".join(p.name for p in audit_overrides))
+        else:
+            st.caption("No Codex audit override active.")
+        projects = _project_choices()
+        if projects:
+            selected_project = st.selectbox("Project to audit", projects, index=0, key="codex_audit_project")
+        else:
+            selected_project = None
+            st.info("No projects found.")
+        cols = st.columns(2)
+        with cols[0]:
+            if st.button("Enable Codex Audit", use_container_width=True, disabled=selected_project is None):
+                path = _set_codex_audit_override(selected_project)
+                _touch_trigger("codex_audit")
+                st.success(f"Codex audit enabled for {selected_project}. Override: {path.name}")
+        with cols[1]:
+            if st.button("Clear Codex Audit", use_container_width=True):
+                _clear_codex_audit_overrides()
+                st.success("Codex audit overrides cleared.")
 
         # ── Review Controls ──────────────────────────────────────
         st.markdown(
@@ -3326,30 +3819,71 @@ with tabs[8]:
 
     # ── OpenClaw connectivity ────────────────────────────────────
     st.divider()
-    st.markdown("**OpenClaw connectivity**")
-    _models, _default_model = _openclaw_models()
-    if not _models:
-        st.error("OpenClaw model not configured.")
+    st.markdown("**UI Watch (Playwright)**")
+    ui_status_path = Path("/home/hackerman/agent-runtime/logs/ui_watch/latest_status.json")
+    if not ui_status_path.exists():
+        st.warning("UI Watch status not found yet.")
     else:
-        st.success(f"OpenClaw ready — default model: {_default_model}")
-        st.caption(f"Models in config: {', '.join(_models[:5])}")
-
-    # ── Endpoint health probes ───────────────────────────────────
-    st.divider()
-    st.markdown("**Endpoint health probes**")
-    endpoints = [
-        ("OpenClaw gateway", "http://127.0.0.1:18789/health", False),
-        ("Local Llama /health", "http://127.0.0.1:11434/health", True),
-        ("Local Llama models", "http://127.0.0.1:11434/v1/models", False),
-    ]
-    for label, url, expect_json in endpoints:
-        status, note = _http_probe(url, expect_json_status=expect_json, timeout=2)
-        if status == "ok":
-            st.success(f"{label}: {note}")
-        elif status == "warn":
-            st.warning(f"{label}: {note}")
+        try:
+            ui_status = json.loads(ui_status_path.read_text(encoding="utf-8"))
+        except Exception:
+            ui_status = {}
+        checks = ui_status.get("checks", [])
+        ok_all = bool(ui_status.get("ok"))
+        if ok_all:
+            st.success("All watched UIs are healthy.")
         else:
-            st.error(f"{label}: {note}")
+            st.error("One or more watched UIs are failing.")
+        for entry in checks:
+            url = entry.get("url", "unknown")
+            ok = entry.get("ok", False)
+            title = entry.get("title", "")
+            errs = entry.get("errors", [])
+            shot = entry.get("screenshot")
+            label = f"{url} · {title}" if title else url
+            if ok:
+                st.success(label)
+            else:
+                st.error(label)
+                if errs:
+                    st.caption("; ".join(errs[:3]))
+                if shot:
+                    st.caption(f"Screenshot: {shot}")
+
+    # ── Governor Audit Log ─────────────────────────────────────
+    st.divider()
+    st.markdown("**Governor Audit Log (recent)**")
+    _gov_audit_path = Path("/home/hackerman/agent-runtime/logs/governor_audit.jsonl")
+    if _gov_audit_path.exists():
+        _gov_audit_lines = []
+        try:
+            _raw_lines = _gov_audit_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            for _gl in reversed(_raw_lines[-50:]):
+                try:
+                    _gov_audit_lines.append(json.loads(_gl))
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        if _gov_audit_lines:
+            _blocked = [e for e in _gov_audit_lines if not e.get("ok", True)]
+            _passed = [e for e in _gov_audit_lines if e.get("ok", True)]
+            g_cols = st.columns(3)
+            g_cols[0].metric("Recent checks", len(_gov_audit_lines))
+            g_cols[1].metric("Passed", len(_passed))
+            g_cols[2].metric("Blocked", len(_blocked))
+            if _blocked:
+                st.markdown("**Blocked actions:**")
+                for _be in _blocked[:5]:
+                    _be_ts = _be.get("ts", "?")
+                    _be_check = _be.get("check", "?")
+                    _be_reasons = ", ".join(_be.get("reasons", ["?"]))
+                    with st.expander(f"{_fmt_time(_be_ts)} · {_be_check}: {_be_reasons}", expanded=False):
+                        st.json(_be)
+        else:
+            st.caption("No governor audit entries yet.")
+    else:
+        st.caption("Governor audit log not found yet.")
 
     if st.button("Refresh health", key="health_refresh"):
         st.rerun()

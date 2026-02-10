@@ -1,0 +1,43 @@
+{
+  "checks": [
+    {
+      "name": "app.py exists",
+      "type": "file_exists",
+      "path": "app.py"
+    },
+    {
+      "name": "No TODO/WIP/FIXME markers in app.py",
+      "type": "no_markers",
+      "path": "app.py",
+      "markers": ["todo", "wip", "fixme"]
+    },
+    {
+      "name": "Tabs: Overview/Inbox/Outputs/Timeline/Settings",
+      "type": "contains_all",
+      "path": "app.py",
+      "patterns": ["Overview", "Inbox", "Outputs", "Timeline", "Settings"]
+    },
+    {
+      "name": "Brief me button uses OpenClaw",
+      "type": "contains_all",
+      "path": "app.py",
+      "patterns": ["Brief me", "openclaw"]
+    },
+    {
+      "name": "Outputs page with search and summary cards",
+      "type": "contains_all",
+      "path": "app.py",
+      "patterns": ["Outputs Library", "Search", "Sort by", "Max items"]
+    },
+    {
+      "name": "Timeline counts per day/week/month",
+      "type": "contains_all",
+      "path": "app.py",
+      "patterns": ["_bucket_day", "_bucket_week", "_bucket_month"]
+    }
+  ],
+  "validation_commands": [
+    ["python", "-m", "py_compile", "app.py"],
+    ["python", "-c", "import streamlit, app"]
+  ]
+}

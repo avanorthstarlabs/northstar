@@ -115,10 +115,18 @@ def extract_fulltext(text: str) -> str:
     end = text.find("END_APP_PY")
     if start != -1 and end != -1 and end > start:
         return text[start + len("BEGIN_APP_PY"):end].strip("\n")
+    # Handle truncated output: BEGIN marker present but END marker missing (token limit)
+    if start != -1 and end == -1:
+        candidate = text[start + len("BEGIN_APP_PY"):].strip("\n")
+        if "import streamlit as st" in candidate and len(candidate) > 2000:
+            return candidate
     # Fallback: treat plain app.py content as fulltext if it looks like the file
     cleaned = text.strip()
     if cleaned.startswith("```"):
         cleaned = cleaned.replace("```python", "").replace("```", "").strip()
+    # Strip stray marker prefix in case model emitted it without closing
+    if cleaned.startswith("BEGIN_APP_PY"):
+        cleaned = cleaned[len("BEGIN_APP_PY"):].strip("\n")
     if (
         "import streamlit as st" in cleaned
         and "st.set_page_config" in cleaned
@@ -320,7 +328,7 @@ def call_claude(prompt: str, model: str, max_tokens: int = 4000) -> str:
     return raw
 
 def main():
-    model = os.environ.get("AUTOPATCH_MODEL", "gpt-5.2-codex")
+    model = os.environ.get("AUTOPATCH_MODEL", "gpt-5.2")
     provider = os.environ.get("AUTOPATCH_PROVIDER", "ollama").strip().lower()
     max_out = int(os.environ.get("AUTOPATCH_MAX_TOKENS", "6000"))
     max_out_full = int(os.environ.get("AUTOPATCH_FULL_MAX_TOKENS", str(max_out * 2)))
