@@ -65,32 +65,32 @@ st.markdown(
        Deep navy + electric blue, refined glass morphism
        ═══════════════════════════════════════════════════════════ */
     :root {
-        --bg: #0b0e17;
-        --bg-gradient-a: #0f1323;
-        --bg-gradient-b: #0b0e17;
-        --bg-gradient-c: #080a12;
-        --panel: rgba(15, 19, 35, 0.75);
-        --panel-hover: rgba(20, 26, 48, 0.88);
-        --panel-solid: #111628;
-        --accent: #4f8aff;
-        --accent-bright: #6ea1ff;
-        --accent-soft: rgba(79, 138, 255, 0.14);
-        --accent-border: rgba(79, 138, 255, 0.22);
-        --accent-glow: rgba(79, 138, 255, 0.30);
-        --text: #e8ecf4;
-        --text-heading: #f0f4ff;
-        --muted: #8892a8;
+        --bg: #050705;
+        --bg-gradient-a: #0a140a;
+        --bg-gradient-b: #050705;
+        --bg-gradient-c: #030403;
+        --panel: rgba(7, 12, 7, 0.75);
+        --panel-hover: rgba(12, 22, 12, 0.88);
+        --panel-solid: #0a150a;
+        --accent: #39ff14;
+        --accent-bright: #5cff3e;
+        --accent-soft: rgba(57, 255, 20, 0.14);
+        --accent-border: rgba(57, 255, 20, 0.22);
+        --accent-glow: rgba(57, 255, 20, 0.30);
+        --text: #eaffea;
+        --text-heading: #f0fff0;
+        --muted: #9ddc9d;
         --danger: #ff5c5c;
         --danger-soft: rgba(255, 92, 92, 0.12);
         --warn: #ffb347;
         --warn-soft: rgba(255, 179, 71, 0.12);
-        --success: #34d399;
-        --success-soft: rgba(52, 211, 153, 0.12);
+        --success: #39ff14;
+        --success-soft: rgba(57, 255, 20, 0.12);
         --radius: 10px;
         --radius-lg: 14px;
-        --shadow-sm: 0 2px 8px rgba(0,0,0,0.18);
-        --shadow-md: 0 4px 20px rgba(0,0,0,0.28);
-        --shadow-lg: 0 8px 32px rgba(0,0,0,0.38);
+        --shadow-sm: 0 2px 8px rgba(0,0,0,0.22);
+        --shadow-md: 0 4px 20px rgba(0,0,0,0.32);
+        --shadow-lg: 0 8px 32px rgba(0,0,0,0.42);
         --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     }
 
@@ -116,7 +116,7 @@ st.markdown(
         transition: all 180ms ease;
     }
     .stButton>button:hover {
-        background: rgba(79, 138, 255, 0.22);
+        background: rgba(57, 255, 20, 0.22);
         border-color: var(--accent);
         box-shadow: 0 0 16px var(--accent-glow);
         transform: translateY(-1px);
@@ -142,7 +142,7 @@ st.markdown(
         overflow: hidden;
     }
     .glass-card:hover {
-        border-color: rgba(79, 138, 255, 0.45);
+        border-color: rgba(57, 255, 20, 0.45);
         box-shadow: var(--shadow-lg);
         transform: translateY(-2px);
     }
@@ -170,7 +170,7 @@ st.markdown(
         margin: 0 0 16px;
         padding: 14px 18px;
         border-radius: var(--radius-lg);
-        background: rgba(15, 19, 35, 0.65);
+        background: rgba(7, 12, 7, 0.65);
         border: 1px solid var(--accent-border);
         backdrop-filter: blur(14px) saturate(1.2);
         box-shadow: var(--shadow-lg);
@@ -243,8 +243,8 @@ st.markdown(
         gap: 8px;
         padding: 5px 12px;
         border-radius: 999px;
-        border: 1px solid rgba(136, 146, 168, 0.2);
-        background: rgba(15, 19, 35, 0.5);
+        border: 1px solid rgba(157, 220, 157, 0.2);
+        background: rgba(7, 12, 7, 0.5);
         color: var(--muted);
         font-size: 0.75rem;
         white-space: nowrap;
@@ -265,7 +265,7 @@ st.markdown(
         display:flex; flex-wrap:wrap; gap:10px;
         padding:10px 14px; margin: 8px 0 14px;
         border-radius: var(--radius-lg);
-        background: rgba(15, 19, 35, 0.5);
+        background: rgba(7, 12, 7, 0.5);
         border: 1px solid var(--accent-border);
         backdrop-filter: blur(8px);
     }
@@ -306,7 +306,7 @@ st.markdown(
 
     /* ── Tab bar ─────────────────────────────────────────────── */
     div[data-baseweb="tab-list"] {
-        background: rgba(15, 19, 35, 0.6);
+        background: rgba(7, 12, 7, 0.6);
         border: 1px solid var(--accent-border);
         border-radius: var(--radius);
         padding: 4px 6px;
@@ -377,8 +377,8 @@ st.markdown(
         color: var(--danger);
     }
     .status-chip.neutral {
-        background: rgba(136, 146, 168, 0.10);
-        border: 1px solid rgba(136, 146, 168, 0.25);
+        background: rgba(157, 220, 157, 0.10);
+        border: 1px solid rgba(157, 220, 157, 0.25);
         color: var(--muted);
     }
 
@@ -444,7 +444,7 @@ st.markdown(
         transition: border-color 200ms ease, transform 180ms ease;
     }
     .hero-stat:hover {
-        border-color: rgba(79, 138, 255, 0.4);
+        border-color: rgba(57, 255, 20, 0.4);
         transform: translateY(-1px);
     }
     .hero-stat .value {
@@ -481,7 +481,7 @@ st.markdown(
 
     /* ── Sidebar ─────────────────────────────────────────────── */
     section[data-testid="stSidebar"] {
-        background: rgba(11, 14, 23, 0.95) !important;
+        background: rgba(5, 8, 5, 0.95) !important;
         border-right: 1px solid var(--accent-border);
     }
     section[data-testid="stSidebar"] > div:first-child {
@@ -493,14 +493,14 @@ st.markdown(
 
     /* ── Inputs ──────────────────────────────────────────────── */
     .stTextArea textarea, .stTextInput input {
-        background: rgba(15, 19, 35, 0.65) !important;
+        background: rgba(7, 12, 7, 0.65) !important;
         border-color: var(--accent-border) !important;
         color: var(--text) !important;
         border-radius: 8px !important;
     }
     .stTextArea textarea:focus, .stTextInput input:focus {
         border-color: var(--accent) !important;
-        box-shadow: 0 0 0 3px rgba(79, 138, 255, 0.12) !important;
+        box-shadow: 0 0 0 3px rgba(57, 255, 20, 0.12) !important;
     }
 
     /* ── Chat messages ───────────────────────────────────────── */
@@ -519,7 +519,7 @@ st.markdown(
 
     /* ── Code blocks ─────────────────────────────────────────── */
     pre {
-        background: rgba(8, 10, 18, 0.8) !important;
+        background: rgba(5, 8, 5, 0.8) !important;
         border: 1px solid var(--accent-border) !important;
         border-radius: 8px !important;
     }
@@ -547,7 +547,7 @@ st.markdown(
         padding: 8px 16px;
         margin: 0 0 16px;
         border-radius: var(--radius);
-        background: rgba(15, 19, 35, 0.5);
+        background: rgba(7, 12, 7, 0.5);
         border: 1px solid var(--accent-border);
         font-size: 0.8rem;
         color: var(--muted);
@@ -584,11 +584,11 @@ st.markdown(
     .kbd {
         display: inline-block;
         padding: 1px 6px;
-        border: 1px solid rgba(136,146,168,0.3);
+        border: 1px solid rgba(157,220,157,0.3);
         border-radius: 4px;
         font-size: 0.7rem;
         color: var(--muted);
-        background: rgba(15, 19, 35, 0.5);
+        background: rgba(7, 12, 7, 0.5);
         font-family: monospace;
     }
 
@@ -636,7 +636,7 @@ st.markdown(
         border-radius: var(--radius);
         padding: 12px 14px;
         margin-bottom: 14px;
-        background: rgba(15, 19, 35, 0.55);
+        background: rgba(7, 12, 7, 0.55);
         backdrop-filter: blur(8px);
     }
     .sb-status-row {
@@ -685,7 +685,7 @@ st.markdown(
         padding: 6px 12px;
         border-radius: 8px;
         color: var(--text);
-        background: rgba(15, 19, 35, 0.45);
+        background: rgba(7, 12, 7, 0.45);
         border: 1px solid var(--accent-border);
         text-decoration: none;
         font-weight: 600;
@@ -712,7 +712,7 @@ st.markdown(
     .inbox-help-card{
         padding: 14px 16px;
         border-radius: var(--radius-lg);
-        background: rgba(15, 19, 35, 0.45);
+        background: rgba(7, 12, 7, 0.45);
         border: 1px solid var(--accent-border);
         backdrop-filter: blur(8px);
     }
@@ -724,7 +724,7 @@ st.markdown(
         display:inline-flex; align-items:center; gap:8px;
         padding:5px 10px; border-radius: 999px;
         border: 1px solid var(--accent-border);
-        background: rgba(15, 19, 35, 0.5);
+        background: rgba(7, 12, 7, 0.5);
         color: var(--muted); font-size: 0.74rem; white-space: nowrap;
     }
     .pill strong{color:var(--text); font-weight:700;}
@@ -733,7 +733,7 @@ st.markdown(
     .inbox-preview{
         border:1px solid var(--accent-border);
         border-radius: var(--radius-lg);
-        background: rgba(8, 10, 18, 0.4);
+        background: rgba(5, 8, 5, 0.4);
         padding: 10px 12px;
         max-height: 420px;
         overflow: auto;
@@ -768,7 +768,7 @@ st.markdown(
         padding: 4px 12px;
         border: 1px solid var(--accent-border);
         border-radius: 8px;
-        background: rgba(15, 19, 35, 0.45);
+        background: rgba(7, 12, 7, 0.45);
     }
     .inbox-toolbar .inbox-stat strong { color: var(--accent-bright); font-weight: 700; }
 
@@ -1405,28 +1405,28 @@ def _copy_button(text: str, key: str) -> None:
     * {{ box-sizing: border-box; }}
     .copy-btn {{
         background:transparent;
-        border:1px solid #4f8aff;
-        color:#4f8aff;
+        border:1px solid #39ff14;
+        color:#39ff14;
         padding:6px 10px;
         border-radius:8px;
         cursor:pointer;
-        box-shadow:0 0 12px rgba(79,138,255,0.6);
+        box-shadow:0 0 12px rgba(57,255,20,0.6);
         transition: all 120ms ease;
         font-weight:600;
     }}
     .copy-btn:active {{
         transform: scale(0.96);
-        box-shadow:0 0 20px rgba(79,138,255,0.9);
+        box-shadow:0 0 20px rgba(57,255,20,0.9);
     }}
     .copy-btn.copied {{
-        color:#0b0e17;
-        background:#4f8aff;
-        box-shadow:0 0 20px rgba(79,138,255,0.9);
+        color:#050705;
+        background:#39ff14;
+        box-shadow:0 0 20px rgba(57,255,20,0.9);
     }}
     .copy-badge {{
         margin-left:8px;
         font-size:0.7rem;
-        color:#4f8aff;
+        color:#39ff14;
         opacity:0;
         transition: opacity 120ms ease;
     }}
@@ -1463,34 +1463,34 @@ def _failure_row(text: str, key: str) -> None:
     .row {{ display:flex; gap:12px; align-items:flex-start; }}
     .card {{
         flex:1;
-        border:1px solid rgba(79,138,255,0.25);
-        background:rgba(15,19,35,0.5);
+        border:1px solid rgba(57,255,20,0.25);
+        background:rgba(7,12,7,0.5);
         border-radius:12px;
         padding:10px 12px;
         box-shadow:0 4px 16px rgba(0,0,0,0.35);
     }}
     .copy {{
         min-width:34px; height:34px; display:flex; align-items:center; justify-content:center;
-        border:1px solid #4f8aff; color:#4f8aff; border-radius:8px; cursor:pointer;
-        box-shadow:0 0 12px rgba(79,138,255,0.6); background:transparent;
+        border:1px solid #39ff14; color:#39ff14; border-radius:8px; cursor:pointer;
+        box-shadow:0 0 12px rgba(57,255,20,0.6); background:transparent;
         font-weight:600;
     }}
     .copy.copied {{
-        color:#0b0e17;
-        background:#4f8aff;
-        box-shadow:0 0 20px rgba(79,138,255,0.9);
+        color:#050705;
+        background:#39ff14;
+        box-shadow:0 0 20px rgba(57,255,20,0.9);
     }}
     .copy-badge {{
         margin-top:6px;
         font-size:0.7rem;
-        color:#4f8aff;
+        color:#39ff14;
         opacity:0;
         transition: opacity 120ms ease;
     }}
     pre {{
         margin:0;
         background:transparent;
-        color:#e8ecf4; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        color:#eaffea; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
         white-space:pre-wrap; word-break:break-word; max-height:72px; overflow:hidden;
     }}
     </style>
