@@ -1043,6 +1043,22 @@ def _credit_snapshot() -> tuple[str, str]:
         return "unknown", "Unable to parse credit log."
 
 def _read_project_status() -> tuple[str, str]:
+    """Read status of the currently active project (not just agent-dashboard)."""
+    projects_root = Path("/home/hackerman/agent-runtime/workspace/projects")
+    if projects_root.exists():
+        for p in sorted(projects_root.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+            if not p.is_dir():
+                continue
+            sp = p / "status.json"
+            if sp.exists():
+                try:
+                    data = json.loads(sp.read_text(encoding="utf-8"))
+                    st = data.get("status", "")
+                    if st == "IN_PROGRESS":
+                        return st, data.get("timestamp", "")
+                except Exception:
+                    continue
+    # Fallback: no active project, show dashboard status
     status_path = Path("/home/hackerman/agent-runtime/workspace/projects/agent-dashboard/status.json")
     if not status_path.exists():
         return "UNKNOWN", "status file missing"
