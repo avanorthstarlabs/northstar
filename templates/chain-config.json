@@ -1,0 +1,10 @@
+{
+  "solana": {
+    "rpc": "https://api.mainnet-beta.solana.com",
+    "chain_id": "solana-mainnet"
+  },
+  "base": {
+    "rpc": "https://mainnet.base.org",
+    "chain_id": "8453"
+  }
+}
