@@ -152,6 +152,30 @@ describe("Lobby.resolveSideBets", () => {
   it("SIDE_BET_RAKE constant is 0.03", () => {
     expect(SIDE_BET_RAKE).toBe(0.03);
   });
+
+  it("increments winner wins and loser losses after resolveSideBets", () => {
+    const fightId = createFightWithBets(lobby, [
+      { wallet: "0xbet1", agent: "a", amount: 10 },
+      { wallet: "0xbet2", agent: "b", amount: 10 },
+    ]);
+
+    // Before resolution
+    expect(lobby.agents.get("a")!.wins).toBe(0);
+    expect(lobby.agents.get("a")!.losses).toBe(0);
+    expect(lobby.agents.get("b")!.wins).toBe(0);
+    expect(lobby.agents.get("b")!.losses).toBe(0);
+
+    // Resolve the bets (which should call recordFightResult)
+    const result = lobby.resolveSideBets(fightId);
+
+    // After resolution, agent a should have 1 win, agent b should have 1 loss
+    expect(result.winner).toBe("a");
+    expect(lobby.agents.get("a")!.wins).toBe(1);
+    expect(lobby.agents.get("a")!.losses).toBe(0);
+    expect(lobby.agents.get("b")!.wins).toBe(0);
+    expect(lobby.agents.get("b")!.losses).toBe(1);
+  });
+
 });
 
 // Helper for "fight not over" test

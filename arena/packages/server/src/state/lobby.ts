@@ -20,6 +20,7 @@ export interface Challenge {
   targetId: string;
   wagerAmount: number;
   createdAt: number;
+  expiresAt: number;
   status: "pending" | "accepted" | "declined" | "expired";
 }
 
@@ -52,6 +53,7 @@ export interface ResolutionResult {
 }
 
 export class Lobby {
+  onFightUpdate?: (fightId: string, state: any) => void;
   agents = new Map<string, Agent>();
   challenges = new Map<string, Challenge>();
   fights = new Map<string, Fight>();
@@ -75,6 +77,7 @@ export class Lobby {
       targetId,
       wagerAmount,
       createdAt: Date.now(),
+      expiresAt: Date.now() + 5 * 60 * 1000,
       status: "pending",
     };
     this.challenges.set(challenge.id, challenge);
@@ -85,6 +88,9 @@ export class Lobby {
     const challenge = this.challenges.get(challengeId);
     if (!challenge) throw new Error("Challenge not found");
     if (challenge.targetId !== agentId) throw new Error("Not the challenge target");
+    if (challenge.status === "pending" && Date.now() > challenge.expiresAt) {
+      challenge.status = "expired";
+    }
     if (challenge.status !== "pending") throw new Error("Challenge not pending");
 
     challenge.status = "accepted";
@@ -98,7 +104,11 @@ export class Lobby {
   submitAction(fightId: string, agentId: string, action: Action) {
     const fight = this.fights.get(fightId);
     if (!fight) throw new Error("Fight not found");
-    return fight.submitAction(agentId, action);
+    const result = fight.submitAction(agentId, action);
+    if (result !== null) {
+      this.onFightUpdate?.(fightId, fight.getState());
+    }
+    return result;
   }
 
   getFight(fightId: string): Fight | undefined {
@@ -150,8 +160,33 @@ export class Lobby {
     return { bets, pool };
   }
 
+  recordFightResult(fightId: string): { winner: string | null; loser: string | null } {
+    const fight = this.fights.get(fightId);
+    if (!fight) throw new Error("Fight not found");
+
+    const state = fight.getState();
+    if (state.status !== "fight_over") throw new Error("Fight not over yet");
+
+    const winner = fight.getWinner();
+    const [agentId1, agentId2] = this.fightAgents.get(fightId) ?? [null, null];
+
+    if (winner !== null) {
+      const winnerAgent = this.agents.get(winner);
+      const loser = winner === agentId1 ? agentId2 : agentId1;
+      const loserAgent = this.agents.get(loser);
+
+      if (winnerAgent) winnerAgent.wins++;
+      if (loserAgent) loserAgent.losses++;
+
+      return { winner, loser };
+    }
+
+    return { winner: null, loser: null };
+  }
+
   resolveSideBets(fightId: string): ResolutionResult {
     const fight = this.fights.get(fightId);
+    this.recordFightResult(fightId);
     if (!fight) throw new Error("Fight not found");
 
     const winner = fight.getWinner();
@@ -260,4 +295,15 @@ export class Lobby {
     };
   }
 
+
+  cleanExpiredChallenges(): number {
+    let count = 0;
+    for (const [, challenge] of this.challenges) {
+      if (challenge.status === "pending" && Date.now() > challenge.expiresAt) {
+        challenge.status = "expired";
+        count++;
+      }
+    }
+    return count;
+  }
 }

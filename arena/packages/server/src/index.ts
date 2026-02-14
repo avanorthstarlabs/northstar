@@ -16,7 +16,12 @@ const lobby = new Lobby();
 const router = createRouter(lobby);
 app.use("/api/v1", router);
 
-setupWebSocket(server, lobby);
+const { broadcast, broadcastToFight } = setupWebSocket(server, lobby);
+
+// Wire up the fight update callback to broadcast to spectators
+lobby.onFightUpdate = (fightId: string, state: any) => {
+  broadcastToFight(fightId, 'fight_update', state);
+};
 
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
