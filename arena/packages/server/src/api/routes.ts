@@ -65,7 +65,15 @@ export function createRouter(lobby: Lobby): Router {
       const body = ActionSchema.parse(req.body);
       const result = lobby.submitAction(body.fight_id, body.agent_id, body.action);
       const fight = lobby.getFight(body.fight_id)!;
-      res.json({ ok: true, result, state: fight.getState() });
+      const state = fight.getState();
+
+      // Auto-resolve side bets when fight ends
+      let resolution = undefined;
+      if (state.status === "fight_over") {
+        try { resolution = lobby.resolveSideBets(body.fight_id); } catch {}
+      }
+
+      res.json({ ok: true, result, state, resolution });
     } catch (e: any) {
       res.status(400).json({ ok: false, error: e.message });
     }
@@ -95,6 +103,62 @@ export function createRouter(lobby: Lobby): Router {
 
   router.get("/arena/agents", (_req: Request, res: Response) => {
     res.json({ ok: true, agents: Array.from(lobby.agents.values()) });
+  });
+
+  router.get("/arena/stats", (_req: Request, res: Response) => {
+    res.json({
+      ok: true,
+      stats: {
+        totalFights: lobby.fights.size,
+        totalAgents: lobby.agents.size,
+        totalWagered: 0,
+      },
+    });
+  });
+
+  router.get("/arena/leaderboard", (_req: Request, res: Response) => {
+    const agents = Array.from(lobby.agents.values()).map((agent) => ({
+      id: agent.id,
+      wins: agent.wins,
+      losses: agent.losses,
+      character: agent.characterId,
+    }));
+    agents.sort((a, b) => b.wins - a.wins);
+    res.json({ ok: true, leaderboard: agents });
+  });
+
+  // --- Side Bets ---
+
+  const SideBetSchema = z.object({
+    fight_id: z.string(),
+    wallet_address: z.string().min(1),
+    backed_agent: z.string(),
+    amount: z.number().positive(),
+  });
+
+  router.post("/arena/side-bet", (req: Request, res: Response) => {
+    try {
+      const body = SideBetSchema.parse(req.body);
+      const bet = lobby.placeSideBet(body.fight_id, body.wallet_address, body.backed_agent, body.amount);
+      const { pool } = lobby.getSideBets(body.fight_id);
+      res.json({ ok: true, bet, pool });
+    } catch (e: any) {
+      res.status(400).json({ ok: false, error: e.message });
+    }
+  });
+
+  router.get("/arena/side-bets/:fightId", (req: Request, res: Response) => {
+    const { bets, pool } = lobby.getSideBets(req.params.fightId);
+    res.json({ ok: true, bets, pool });
+  });
+
+  router.post("/arena/resolve-bets/:fightId", (req: Request, res: Response) => {
+    try {
+      const result = lobby.resolveSideBets(req.params.fightId);
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      res.status(400).json({ ok: false, error: e.message });
+    }
   });
 
   return router;

@@ -1,9 +1,10 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { ArenaScene } from "../../../components/arena/ArenaScene";
 import { useGameState } from "../../../components/arena/useGameState";
+import { BettingPanel } from "../../../components/arena/BettingPanel";
 
 export default function FightPage() {
   const params = useParams();
@@ -16,5 +17,10 @@ export default function FightPage() {
     return () => clearInterval(interval);
   }, [refetch]);
 
-  return <ArenaScene gameState={state} />;
+  return (
+    <div style={{ position: "relative", width: "100%", height: "100vh" }}>
+      <ArenaScene gameState={state} />
+      {state && <BettingPanel state={state} />}
+    </div>
+  );
 }

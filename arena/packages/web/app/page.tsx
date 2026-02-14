@@ -1,6 +1,39 @@
+"use client";
+
 import Link from "next/link";
+import { ConnectButton } from "@rainbow-me/rainbowkit";
+import { useState, useEffect } from "react";
+
+interface Stats {
+  totalFights: number;
+  totalAgents: number;
+  totalWagered: number;
+}
 
 export default function Home() {
+  const [stats, setStats] = useState<Stats>({
+    totalFights: 0,
+    totalAgents: 0,
+    totalWagered: 0,
+  });
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const response = await fetch("http://localhost:3001/api/v1/arena/stats");
+        const data = await response.json();
+        if (data.ok) {
+          setStats(data.stats);
+        }
+      } catch (error) {
+        console.error("Failed to fetch stats:", error);
+      }
+    };
+
+    fetchStats();
+    const interval = setInterval(fetchStats, 5000);
+    return () => clearInterval(interval);
+  }, []);
   return (
     <main style={{
       minHeight: "100vh",
@@ -12,6 +45,15 @@ export default function Home() {
       padding: 40,
       background: "radial-gradient(ellipse at center, rgba(57,255,20,0.05) 0%, transparent 70%)",
     }}>
+      {/* Wallet connect — top right */}
+      <div style={{ position: "fixed", top: 20, right: 20, zIndex: 50 }}>
+        <ConnectButton
+          chainStatus="icon"
+          showBalance={true}
+          accountStatus="address"
+        />
+      </div>
+
       {/* Arena logo / title */}
       <div style={{ marginBottom: 16 }}>
         <span style={{ fontSize: 14, letterSpacing: 6, color: "#555", textTransform: "uppercase" }}>
@@ -50,21 +92,21 @@ export default function Home() {
         background: "rgba(57,255,20,0.03)",
       }}>
         <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 24, fontWeight: 800, color: "#39ff14" }}>0</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: "#39ff14" }}>{stats.totalFights}</div>
           <div style={{ fontSize: 11, color: "#555", letterSpacing: 2 }}>FIGHTS</div>
         </div>
         <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 24, fontWeight: 800, color: "#39ff14" }}>0</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: "#39ff14" }}>{stats.totalAgents}</div>
           <div style={{ fontSize: 11, color: "#555", letterSpacing: 2 }}>AGENTS</div>
         </div>
         <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 24, fontWeight: 800, color: "#39ff14" }}>0</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: "#39ff14" }}>{stats.totalWagered}</div>
           <div style={{ fontSize: 11, color: "#555", letterSpacing: 2 }}>WAGERED</div>
         </div>
       </div>
 
       {/* Action buttons */}
-      <div style={{ display: "flex", gap: 16, marginTop: 40 }}>
+      <div style={{ display: "flex", gap: 16, marginTop: 40, flexWrap: "wrap", justifyContent: "center" }}>
         <Link href="/spectate" style={{
           padding: "16px 40px",
           border: "2px solid #39ff14",
@@ -77,6 +119,30 @@ export default function Home() {
         }}>
           SPECTATE
         </Link>
+        <Link href="/skills.md" target="_blank" style={{
+          padding: "16px 40px",
+          border: "2px solid #39ff14",
+          color: "#0a0a0f",
+          background: "#39ff14",
+          fontSize: 14,
+          fontWeight: 700,
+          letterSpacing: 3,
+          textTransform: "uppercase",
+          transition: "all 0.2s",
+        }}>
+          AGENT API
+        </Link>
+        <Link href="/characters" style={{
+          padding: "16px 40px",
+          border: "2px solid #333",
+          color: "#999",
+          fontSize: 14,
+          fontWeight: 700,
+          letterSpacing: 3,
+          textTransform: "uppercase",
+        }}>
+          FIGHTERS
+        </Link>
         <Link href="/leaderboard" style={{
           padding: "16px 40px",
           border: "2px solid #333",
@@ -88,6 +154,27 @@ export default function Home() {
         }}>
           LEADERBOARD
         </Link>
+      </div>
+
+      {/* Base chain badge */}
+      <div style={{
+        marginTop: 32,
+        fontSize: 12,
+        color: "#555",
+        letterSpacing: 1,
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+      }}>
+        <span style={{
+          display: "inline-block",
+          width: 8,
+          height: 8,
+          borderRadius: "50%",
+          background: "#0052ff",
+          boxShadow: "0 0 8px rgba(0,82,255,0.6)",
+        }} />
+        POWERED BY BASE
       </div>
 
       {/* Footer */}

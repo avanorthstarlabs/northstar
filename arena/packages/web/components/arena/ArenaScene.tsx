@@ -53,11 +53,31 @@ interface ArenaSceneProps {
   gameState: FightState | null;
 }
 
+// Character mapping - can be extended to use actual character IDs from game state
+const CHARACTER_MAP: Record<string, string> = {
+  "default": "cyborg",
+  "p1": "knight",
+  "p2": "ronin",
+};
+
+function getCharacterId(agentId: string | undefined, isP1: boolean): string {
+  // You can extend this to map agent IDs to character IDs
+  // For now, use default characters based on player position
+  return isP1 ? CHARACTER_MAP.p1 : CHARACTER_MAP.p2;
+}
+
 export function ArenaScene({ gameState }: ArenaSceneProps) {
   const isP1Hurt = gameState?.lastResult ? gameState.lastResult.p2Damage > 0 : false;
   const isP2Hurt = gameState?.lastResult ? gameState.lastResult.p1Damage > 0 : false;
   const isP1KO = gameState ? gameState.p1.hp <= 0 : false;
   const isP2KO = gameState ? gameState.p2.hp <= 0 : false;
+
+  // Get the last action from history for animation
+  const lastHistoryEntry = gameState?.history && gameState.history.length > 0
+    ? gameState.history[gameState.history.length - 1]
+    : null;
+  const p1CurrentAction = lastHistoryEntry?.p1Action;
+  const p2CurrentAction = lastHistoryEntry?.p2Action;
 
   return (
     <div style={{ width: "100%", height: "100vh", position: "relative", background: "#0a0a0f" }}>
@@ -80,22 +100,26 @@ export function ArenaScene({ gameState }: ArenaSceneProps) {
         <BillboardFighter
           position={[-2.5, 1.1, 0]}
           label={gameState?.p1.agentId ?? "P1"}
-          color="#3939ff"
+          color="#74b9ff"
           flipX={false}
           hp={gameState?.p1.hp ?? 100}
           isHurt={isP1Hurt}
           isKO={isP1KO}
+          characterId={getCharacterId(gameState?.p1.agentId, true)}
+          currentAction={p1CurrentAction}
         />
 
         {/* P2 fighter (red side) */}
         <BillboardFighter
           position={[2.5, 1.1, 0]}
           label={gameState?.p2.agentId ?? "P2"}
-          color="#ff3939"
+          color="#ff6b6b"
           flipX={true}
           hp={gameState?.p2.hp ?? 100}
           isHurt={isP2Hurt}
           isKO={isP2KO}
+          characterId={getCharacterId(gameState?.p2.agentId, false)}
+          currentAction={p2CurrentAction}
         />
 
         <OrbitControls
