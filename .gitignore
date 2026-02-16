@@ -1,5 +1,7 @@
-# Secrets
+# Secrets — NEVER commit .env files
 .env
+.env.*
+!.env.example
 *.key
 *.pem
 
